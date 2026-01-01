@@ -1,0 +1,33 @@
+name: Build Heltec V3.1 with AHT20 & SHT31
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Arduino CLI
+      uses: arduino/setup-arduino-cli@v1
+      
+    - name: Install ESP32 core
+      run: arduino-cli core install esp32:esp32
+      
+    - name: Install required libraries
+      run: |
+        arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
+        arduino-cli lib install "Adafruit AHTX0"
+        arduino-cli lib install "Adafruit SHT31 Library"
+        arduino-cli lib install "Wire"
+      
+    - name: Compile sketch
+      run: |
+        arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-path ./build .
+      
+    - name: Upload firmware artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware
+        path: ./build/*.bin
