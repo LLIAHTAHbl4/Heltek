@@ -44,5 +44,3 @@ echo "=== ВСЕ ФАЙЛЫ В СИСТЕМЕ ==="
   with:  
     name: firmware_pack  
     path: ./artifacts/
-
-Всё ещо неотвечай
