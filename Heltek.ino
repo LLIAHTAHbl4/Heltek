@@ -1,63 +1,51 @@
 /*
- * Heltec WiFi Kit 32 V3.1 - ДВА ДИСПЛЕЯ на одной шине I2C
- * Встроенный SH1106 и дополнительный SSD1306
- * Оба на пинах 17,18
+ * Heltec V3.1 - Один дисплей + AS5600 (имитация)
+ * Показывает угол и время
  */
 
 #include "SH1106Wire.h"
-#include "SSD1306Wire.h"
 #include "Wire.h"
 
-// === НАСТРОЙКИ ДИСПЛЕЕВ ===
-#define SDA_PIN        17  // Единственные рабочие I2C пины
-#define SCL_PIN        18  // на твоей плате
-#define OLED_VEXT      10  // Питание дисплея
-#define OLED_RST       21  // Reset дисплея
+// === ПИНЫ ===
+#define SDA_PIN   17
+#define SCL_PIN   18
+#define OLED_VEXT 10
+#define OLED_RST  21
 
-// Адреса дисплеев
-uint8_t display1_addr = 0x3C;  // Встроенный SH1106
-uint8_t display2_addr = 0x3D;  // Дополнительный SSD1306 (пробуем 0x3C если не работает)
+// === АДРЕСА ===
+#define DISPLAY_ADDR 0x3C
+#define AS5600_ADDR  0x36
 
-// Объекты дисплеев
-SH1106Wire display1(display1_addr, SDA_PIN, SCL_PIN);  // Встроенный
-SSD1306Wire display2(display2_addr, SDA_PIN, SCL_PIN); // Дополнительный
+SH1106Wire display(DISPLAY_ADDR, SDA_PIN, SCL_PIN);
 
 // === ПЕРЕМЕННЫЕ ===
-bool display1OK = false;
-bool display2OK = false;
-unsigned long lastMillis = 0;
+bool as5600Connected = false;
+float currentAngle = 0.0;
+unsigned long lastUpdate = 0;
 
 // ======================= SETUP =======================
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n=== HELTEC V3.1 - ДВА ДИСПЛЕЯ ===");
-  Serial.println("Оба на пинах 17,18");
+  Serial.println("\n=== Heltec V3.1 - Дисплей + AS5600 ===");
   
-  // Инициализация I2C
-  Wire.begin(SDA_PIN, SCL_PIN);
-  Wire.setClock(400000); // Быстрый I2C
-  
-  // Инициализация дисплеев
-  initDisplays();
-  
-  // Сканирование I2C для проверки
+  initDisplay();
   scanI2C();
-  
-  // Показываем стартовый экран
-  showStartScreens();
+  showStartScreen();
 }
 
 // ======================= LOOP =======================
 void loop() {
-  unsigned long currentMillis = millis();
+  unsigned long now = millis();
   
-  // Обновляем каждые 50мс для плавного времени
-  if (currentMillis - lastMillis >= 50) {
-    lastMillis = currentMillis;
+  if (now - lastUpdate >= 100) { // 10 раз в секунду
+    lastUpdate = now;
     
-    // Обновляем оба дисплея
-    updateDisplay1(); // Встроенный
-    updateDisplay2(); // Дополнительный
+    if (as5600Connected) {
+      // Имитация чтения AS5600
+      simulateAS5600();
+    }
+    
+    updateDisplay();
   }
   
   delay(1);
@@ -65,197 +53,109 @@ void loop() {
 
 // ======================= ФУНКЦИИ =======================
 
-void initDisplays() {
-  Serial.println("\nИНИЦИАЛИЗАЦИЯ ДИСПЛЕЕВ:");
-  
-  // 1. Включаем питание дисплеев
+void initDisplay() {
   pinMode(OLED_VEXT, OUTPUT);
   digitalWrite(OLED_VEXT, LOW);
   delay(100);
   
-  // 2. Сброс дисплеев
   pinMode(OLED_RST, OUTPUT);
   digitalWrite(OLED_RST, LOW);
   delay(50);
   digitalWrite(OLED_RST, HIGH);
   delay(50);
   
-  // 3. Инициализация встроенного дисплея (SH1106)
-  Serial.print("Дисплей 1 (SH1106, адрес 0x");
-  Serial.print(display1_addr, HEX);
-  Serial.print(")... ");
-  
-  display1.init();
-  display1.flipScreenVertically();
-  display1.clear();
-  
-  // Проверяем подключение
-  Wire.beginTransmission(display1_addr);
-  if (Wire.endTransmission() == 0) {
-    display1OK = true;
-    Serial.println("OK ✅");
-  } else {
-    display1OK = false;
-    Serial.println("ERROR ❌");
-  }
-  
-  // 4. Инициализация дополнительного дисплея (SSD1306)
-  Serial.print("Дисплей 2 (SSD1306, адрес 0x");
-  Serial.print(display2_addr, HEX);
-  Serial.print(")... ");
-  
-  // Пробуем инициализировать
-  display2.init();
-  display2.flipScreenVertically();
-  display2.clear();
-  
-  // Проверяем подключение
-  Wire.beginTransmission(display2_addr);
-  byte error = Wire.endTransmission();
-  
-  if (error == 0) {
-    display2OK = true;
-    Serial.println("OK ✅");
-  } else {
-    display2OK = false;
-    Serial.println("ERROR ❌");
-    
-    // Пробуем альтернативный адрес 0x3C
-    Serial.print("Пробую адрес 0x3C... ");
-    display2_addr = 0x3C;
-    
-    // Пересоздаем объект дисплея с новым адресом
-    display2 = SSD1306Wire(display2_addr, SDA_PIN, SCL_PIN);
-    display2.init();
-    display2.flipScreenVertically();
-    display2.clear();
-    
-    Wire.beginTransmission(display2_addr);
-    if (Wire.endTransmission() == 0) {
-      display2OK = true;
-      Serial.println("OK ✅ (оба на 0x3C)");
-    } else {
-      Serial.println("ERROR ❌");
-      display2OK = false;
-    }
-  }
+  Wire.begin(SDA_PIN, SCL_PIN);
+  display.init();
+  display.flipScreenVertically();
+  display.clear();
 }
 
 void scanI2C() {
-  Serial.println("\nСКАНИРОВАНИЕ I2C ШИНЫ:");
+  Serial.println("Сканирование I2C...");
   
-  int found = 0;
   for (byte addr = 1; addr < 127; addr++) {
     Wire.beginTransmission(addr);
     byte error = Wire.endTransmission();
     
     if (error == 0) {
-      Serial.print("  Найден: 0x");
+      Serial.print("Найден: 0x");
       if (addr < 16) Serial.print("0");
       Serial.print(addr, HEX);
       
-      if (addr == display1_addr) Serial.print(" (Дисплей 1)");
-      if (addr == display2_addr) Serial.print(" (Дисплей 2)");
+      if (addr == DISPLAY_ADDR) Serial.print(" (Дисплей)");
+      if (addr == AS5600_ADDR) {
+        Serial.print(" (AS5600!)");
+        as5600Connected = true;
+      }
       
       Serial.println();
-      found++;
     }
   }
-  
-  if (found == 0) {
-    Serial.println("  Устройств не найдено!");
-  }
-  
-  Serial.print("Всего устройств: ");
-  Serial.println(found);
 }
 
-void showStartScreens() {
-  Serial.println("\nПОКАЗЫВАЮ СТАРТОВЫЕ ЭКРАНЫ...");
+void showStartScreen() {
+  display.clear();
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(10, 0, "Heltec V3.1");
   
-  if (display1OK) {
-    display1.clear();
-    display1.setFont(ArialMT_Plain_16);
-    display1.drawString(10, 0, "ДИСПЛЕЙ 1");
-    display1.setFont(ArialMT_Plain_10);
-    display1.drawString(0, 25, "Встроенный SH1106");
-    display1.drawString(0, 40, "Адрес: 0x" + String(display1_addr, HEX));
-    display1.drawString(0, 55, "ПРИВЕТ!");
-    display1.display();
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(0, 25, "Дисплей: 0x3C");
+  
+  if (as5600Connected) {
+    display.drawString(0, 40, "AS5600: Найден");
+    display.drawString(0, 55, "Адрес: 0x36");
+  } else {
+    display.drawString(0, 40, "AS5600: Нет");
+    display.drawString(0, 55, "Имитация данных");
   }
   
-  if (display2OK) {
-    display2.clear();
-    display2.setFont(ArialMT_Plain_16);
-    display2.drawString(10, 0, "ДИСПЛЕЙ 2");
-    display2.setFont(ArialMT_Plain_10);
-    display2.drawString(0, 25, "Дополнительный");
-    display2.drawString(0, 40, "Адрес: 0x" + String(display2_addr, HEX));
-    display2.drawString(0, 55, "ПРИВЕТ!");
-    display2.display();
-  }
-  
+  display.display();
   delay(2000);
 }
 
-void updateDisplay1() {
-  if (!display1OK) return;
+void simulateAS5600() {
+  // Имитация вращения от 0 до 360 градусов
+  static float angle = 0.0;
+  angle += 1.2; // Скорость вращения
   
-  unsigned long now = millis();
-  unsigned long seconds = now / 1000;
-  unsigned long milliseconds = now % 1000;
+  if (angle > 360.0) {
+    angle = 0.0;
+  }
   
-  // Форматируем время: "секунды:миллисекунды"
-  String timeStr = String(seconds) + ":";
-  if (milliseconds < 100) timeStr += "0";
-  if (milliseconds < 10) timeStr += "0";
-  timeStr += String(milliseconds);
-  
-  display1.clear();
-  
-  // Верхняя часть - заголовок
-  display1.setFont(ArialMT_Plain_10);
-  display1.drawString(0, 0, "Дисплей 1 - Встроенный");
-  
-  // Большие цифры времени
-  display1.setFont(ArialMT_Plain_24);
-  display1.drawString(5, 15, timeStr);
-  
-  // Информация внизу
-  display1.setFont(ArialMT_Plain_10);
-  display1.drawString(0, 45, "Пины: 17,18");
-  display1.drawString(0, 55, "Адрес: 0x" + String(display1_addr, HEX));
-  
-  display1.display();
+  currentAngle = angle;
 }
 
-void updateDisplay2() {
-  if (!display2OK) return;
-  
+void updateDisplay() {
   unsigned long now = millis();
   unsigned long seconds = now / 1000;
   unsigned long milliseconds = now % 1000;
   
-  // Форматируем время: "секунды:миллисекунды"
+  // Время: секунды:миллисекунды
   String timeStr = String(seconds) + ":";
   if (milliseconds < 100) timeStr += "0";
   if (milliseconds < 10) timeStr += "0";
   timeStr += String(milliseconds);
   
-  display2.clear();
+  display.clear();
   
-  // Верхняя часть - заголовок
-  display2.setFont(ArialMT_Plain_10);
-  display2.drawString(0, 0, "Дисплей 2 - Дополнит.");
+  // Верхняя строка - время
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(0, 0, "Время: " + timeStr);
   
-  // Большие цифры времени
-  display2.setFont(ArialMT_Plain_24);
-  display2.drawString(5, 15, timeStr);
+  // Большой угол
+  display.setFont(ArialMT_Plain_24);
+  String angleStr = String(currentAngle, 1) + "°";
+  display.drawString(10, 15, angleStr);
   
-  // Информация внизу
-  display2.setFont(ArialMT_Plain_10);
-  display2.drawString(0, 45, "На одной шине I2C");
-  display2.drawString(0, 55, "Адрес: 0x" + String(display2_addr, HEX));
+  // Статус внизу
+  display.setFont(ArialMT_Plain_10);
+  if (as5600Connected) {
+    display.drawString(0, 45, "AS5600: Подключен");
+    display.drawString(0, 55, "Реальные данные");
+  } else {
+    display.drawString(0, 45, "AS5600: Не найден");
+    display.drawString(0, 55, "Имитация: " + angleStr);
+  }
   
-  display2.display();
+  display.display();
 }
