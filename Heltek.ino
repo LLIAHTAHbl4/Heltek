@@ -1,205 +1,161 @@
 /*
  * Heltec WiFi Kit 32 V3.1
- * Два дисплея: встроенный SH1106 + дополнительный SSD1306
- * Работает с библиотекой версии 4.6.1
+ * ПРОСТОЙ тест пинов I2C с SSD1306
  */
 
-#include "SH1106Wire.h"  // Для встроенного дисплея
-#include "SSD1306Wire.h" // Для дополнительного дисплея
+#include "SH1106Wire.h"
 #include "Wire.h"
 
-// === ВСТРОЕННЫЙ ДИСПЛЕЙ (SH1106) ===
-#define MAIN_SDA      17  // Фиксировано на плате!
-#define MAIN_SCL      18  // Фиксировано на плате!
-#define OLED_VEXT     10  // Питание дисплея
-#define OLED_RST      21  // Reset дисплея
-SH1106Wire mainDisplay(0x3C, MAIN_SDA, MAIN_SCL);
+// === ВСТРОЕННЫЙ ДИСПЛЕЙ ===
+#define MAIN_SDA  17
+#define MAIN_SCL  18
+#define OLED_VEXT 10
+#define OLED_RST  21
+SH1106Wire display(0x3C, MAIN_SDA, MAIN_SCL);
 
-// === ДОПОЛНИТЕЛЬНЫЙ ДИСПЛЕЙ (SSD1306) ===
-// ВЫБЕРИ ОДИН ИЗ ВАРИАНТОВ:
-#define EXT_SDA       33  // Вариант 1: GPIO33 (Header J3, пин 7)
-#define EXT_SCL       34  // Вариант 1: GPIO34 (Header J3, пин 8)
-// #define EXT_SDA       7   // Вариант 2: GPIO7 (Header J2, пин 12)
-// #define EXT_SCL       6   // Вариант 2: GPIO6 (Header J2, пин 13)
-// #define EXT_SDA       4   // Вариант 3: GPIO4 (Header J2, пин 15)
-// #define EXT_SCL       5   // Вариант 3: GPIO5 (Header J2, пин 14)
-
-SSD1306Wire extDisplay(0x3C, EXT_SDA, EXT_SCL);
-
-// === ДЛЯ ВТОРОГО I2C ===
-TwoWire secondWire = TwoWire(1); // Создаем второй I2C
-
-// === ПЕРЕМЕННЫЕ ===
-bool extDisplayOK = false;
+// === ТЕСТИРУЕМЫЕ ПИНЫ ДЛЯ SSD1306 ===
+// Попробуй по очереди эти варианты:
+// #define TEST_SDA  33  // Вариант 1
+// #define TEST_SCL  34  // Вариант 1
+// #define TEST_SDA  7   // Вариант 2
+// #define TEST_SCL  6   // Вариант 2
+#define TEST_SDA  4   // Вариант 3
+#define TEST_SCL  5   // Вариант 3
 
 // ======================= SETUP =======================
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n=== HELTEC V3.1 - ДВА ДИСПЛЕЯ ===");
-  Serial.print("Доп. дисплей на пинах: ");
-  Serial.print(EXT_SDA);
-  Serial.print(",");
-  Serial.println(EXT_SCL);
+  Serial.println("\n=== ТЕСТ ПИНОВ ДЛЯ SSD1306 ===");
   
-  // 1. Инициализация встроенного дисплея
-  initMainDisplay();
+  initDisplay();
   
-  // 2. Инициализация дополнительного дисплея
-  initExternalDisplay();
+  Serial.print("\nТестирую пины: SDA=");
+  Serial.print(TEST_SDA);
+  Serial.print(", SCL=");
+  Serial.println(TEST_SCL);
   
-  // 3. Показываем приветствие
-  showWelcome();
+  testI2CPins();
+  
+  // Бесконечный тест
+  while(true) {
+    testLoop();
+    delay(2000);
+  }
 }
 
 // ======================= LOOP =======================
 void loop() {
-  // Обновляем дисплеи каждую секунду
-  static unsigned long lastUpdate = 0;
-  if (millis() - lastUpdate > 1000) {
-    lastUpdate = millis();
-    updateDisplays();
-  }
-  delay(100);
+  // Не используется - все в setup
 }
 
 // ======================= ФУНКЦИИ =======================
 
-void initMainDisplay() {
-  Serial.println("Инициализация встроенного дисплея...");
-  
-  // Включаем питание дисплея
+void initDisplay() {
   pinMode(OLED_VEXT, OUTPUT);
   digitalWrite(OLED_VEXT, LOW);
   delay(100);
   
-  // Сброс дисплея
   pinMode(OLED_RST, OUTPUT);
   digitalWrite(OLED_RST, LOW);
   delay(50);
   digitalWrite(OLED_RST, HIGH);
-  delay(50);
   
-  // Инициализация основного I2C (Wire)
   Wire.begin(MAIN_SDA, MAIN_SCL);
+  display.init();
+  display.flipScreenVertically();
+  display.clear();
   
-  // Инициализация дисплея
-  mainDisplay.init();
-  mainDisplay.flipScreenVertically();
-  mainDisplay.clear();
-  
-  Serial.println("✅ Встроенный дисплей готов");
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(10, 0, "ТЕСТ ПИНОВ");
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(0, 25, String(TEST_SDA) + "," + String(TEST_SCL));
+  display.display();
 }
 
-void initExternalDisplay() {
-  Serial.println("Инициализация дополнительного дисплея...");
+void testI2CPins() {
+  // 1. Проверка напряжения
+  pinMode(TEST_SDA, INPUT_PULLUP);
+  pinMode(TEST_SCL, INPUT_PULLUP);
+  delay(10);
   
-  // Вариант A: Используем второй I2C (Wire1)
-  // В библиотеке 4.6.1 нужно использовать глобальный Wire1
-  // Но мы не можем изменить глобальный Wire1, поэтому используем хак:
+  int sdaState = digitalRead(TEST_SDA);
+  int sclState = digitalRead(TEST_SCL);
   
-  // 1. Временно переключаем глобальный Wire на наши пины
+  Serial.print("Напряжение: SDA=");
+  Serial.print(sdaState == HIGH ? "3.3V" : "LOW");
+  Serial.print(", SCL=");
+  Serial.println(sclState == HIGH ? "3.3V" : "LOW");
+  
+  // 2. Тест I2C
   Wire.end(); // Отключаем основной Wire
   
-  // 2. Настраиваем Wire на пины дополнительного дисплея
-  Wire.begin(EXT_SDA, EXT_SCL);
-  Wire.setClock(400000); // Быстрый I2C
+  Wire.begin(TEST_SDA, TEST_SCL);
+  Wire.setClock(100000);
   
-  // 3. Инициализируем дополнительный дисплей
-  extDisplay.init();
-  extDisplay.flipScreenVertically();
-  extDisplay.clear();
+  Serial.println("Сканирование I2C...");
   
-  // 4. Проверяем подключение
+  bool found = false;
+  for(byte addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    byte error = Wire.endTransmission();
+    
+    if(error == 0) {
+      Serial.print("Найден: 0x");
+      if(addr < 16) Serial.print("0");
+      Serial.println(addr, HEX);
+      found = true;
+      
+      if(addr == 0x3C) {
+        Serial.println(">>> SSD1306 обнаружен! <<<");
+        
+        display.clear();
+        display.drawString(0, 40, "SSD1306 НАЙДЕН!");
+        display.display();
+      }
+    }
+  }
+  
+  if(!found) {
+    Serial.println("Устройств не найдено");
+    
+    display.clear();
+    display.drawString(0, 40, "Нет устройств");
+    display.display();
+  }
+  
+  // Возвращаем Wire к основному дисплею
+  Wire.end();
+  Wire.begin(MAIN_SDA, MAIN_SCL);
+}
+
+void testLoop() {
+  // Тестовый цикл для осциллографа
+  
+  // 1. Переключаемся на тестовые пины
+  Wire.end();
+  Wire.begin(TEST_SDA, TEST_SCL);
+  
+  // 2. Делаем запрос к адресу 0x3C
+  Serial.print("Тест ");
+  Serial.print(millis()/1000);
+  Serial.println(" сек");
+  
   Wire.beginTransmission(0x3C);
   byte error = Wire.endTransmission();
   
-  // 5. Возвращаем основной Wire обратно на пины 17,18
+  Serial.print("Ответ: ");
+  Serial.println(error == 0 ? "Устройство есть" : "Нет ответа");
+  
+  // 3. Возвращаемся к основному дисплею
   Wire.end();
   Wire.begin(MAIN_SDA, MAIN_SCL);
   
-  if (error == 0) {
-    extDisplayOK = true;
-    Serial.println("✅ Дополнительный дисплей найден!");
-    
-    // Теперь нужно сделать так, чтобы оба дисплея работали
-    // Будем использовать второй дисплей только для статичной информации
-    // или будем переключать Wire при необходимости
-  } else {
-    extDisplayOK = false;
-    Serial.println("❌ Дополнительный дисплей не найден!");
-    Serial.print("   Ошибка I2C: ");
-    Serial.println(error);
-  }
-}
-
-void showWelcome() {
-  // Сначала показываем на основном дисплее
-  mainDisplay.clear();
-  mainDisplay.setFont(ArialMT_Plain_16);
-  mainDisplay.drawString(10, 0, "HELTEC V3.1");
-  mainDisplay.setFont(ArialMT_Plain_10);
-  mainDisplay.drawString(0, 25, "Встроенный SH1106");
-  mainDisplay.drawString(0, 40, "Пины: 17,18");
-  mainDisplay.display();
-  
-  delay(1000);
-  
-  // Затем показываем на дополнительном дисплее (если работает)
-  if (extDisplayOK) {
-    // Переключаем Wire на пины доп. дисплея
-    Wire.end();
-    Wire.begin(EXT_SDA, EXT_SCL);
-    
-    extDisplay.clear();
-    extDisplay.setFont(ArialMT_Plain_16);
-    extDisplay.drawString(10, 0, "ДОП. ДИСПЛЕЙ");
-    extDisplay.drawString(10, 20, "SSD1306");
-    extDisplay.setFont(ArialMT_Plain_10);
-    extDisplay.drawString(0, 45, String(EXT_SDA) + "," + String(EXT_SCL));
-    extDisplay.drawString(0, 55, "ПРИВЕТ!");
-    extDisplay.display();
-    
-    // Возвращаем Wire на основной дисплей
-    delay(1000);
-    Wire.end();
-    Wire.begin(MAIN_SDA, MAIN_SCL);
-  }
-  
-  delay(1000);
-}
-
-void updateDisplays() {
-  static int counter = 0;
-  counter++;
-  
-  // 1. Обновляем встроенный дисплей
-  mainDisplay.clear();
-  mainDisplay.setFont(ArialMT_Plain_10);
-  mainDisplay.drawString(0, 0, "Встроенный SH1106");
-  mainDisplay.drawString(0, 15, "Время: " + String(millis()/1000) + "s");
-  mainDisplay.drawString(0, 30, "Счетчик: " + String(counter));
-  mainDisplay.drawString(0, 45, "Доп. дисплей:");
-  mainDisplay.drawString(80, 45, extDisplayOK ? "OK" : "NO");
-  mainDisplay.display();
-  
-  // 2. Обновляем дополнительный дисплей (если работает)
-  if (extDisplayOK) {
-    // Временно переключаемся на доп. дисплей
-    Wire.end();
-    Wire.begin(EXT_SDA, EXT_SCL);
-    
-    extDisplay.clear();
-    extDisplay.setFont(ArialMT_Plain_10);
-    extDisplay.drawString(0, 0, "Доп. SSD1306");
-    extDisplay.drawString(0, 15, "Пины: " + String(EXT_SDA) + "," + String(EXT_SCL));
-    extDisplay.setFont(ArialMT_Plain_24);
-    extDisplay.drawString(20, 25, "ПРИВЕТ");
-    extDisplay.setFont(ArialMT_Plain_10);
-    extDisplay.drawString(0, 55, "Count: " + String(counter));
-    extDisplay.display();
-    
-    // Возвращаемся к основному дисплею
-    Wire.end();
-    Wire.begin(MAIN_SDA, MAIN_SCL);
-  }
+  // 4. Обновляем дисплей
+  display.clear();
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(0, 0, "Тест пинов:");
+  display.drawString(0, 15, String(TEST_SDA) + "," + String(TEST_SCL));
+  display.drawString(0, 30, "Время: " + String(millis()/1000) + "s");
+  display.drawString(0, 45, "Сканирую каждые 2с");
+  display.display();
 }
