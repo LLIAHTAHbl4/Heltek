@@ -6,6 +6,7 @@
 
 #include "SH1106Wire.h"
 #include "AS5600.h"
+#include "Wire.h"
 
 // === КОНСТАНТЫ ДИСПЛЕЯ ===
 #define OLED_VEXT     10    // Питание дисплея (LOW = ВКЛ)
@@ -22,6 +23,7 @@
 // === ОБЪЕКТЫ ===
 SH1106Wire display(OLED_ADDR, OLED_SDA, OLED_SCL);
 AS5600 as5600;  // Создаем объект датчика
+TwoWire I2C_AS5600 = TwoWire(0); // Создаем отдельный экземпляр I2C для AS5600
 
 // Данные датчика
 int rawAngle = 0;
@@ -94,7 +96,7 @@ void initDisplay() {
   digitalWrite(OLED_RST, HIGH);
   delay(50);
   
-  // Инициализация дисплея
+  // Инициализация дисплея (используем основной Wire)
   Wire.begin(OLED_SDA, OLED_SCL);
   display.init();
   display.flipScreenVertically(); // ОБЯЗАТЕЛЬНО!
@@ -107,22 +109,24 @@ void initDisplay() {
 void initAS5600() {
   Serial.println("Поиск датчика AS5600...");
   
-  // Инициализация I2C для датчика (Wire1)
-  Wire1.begin(AS5600_SDA, AS5600_SCL);
-  Wire1.setClock(100000);
+  // Инициализация отдельного I2C для AS5600
+  I2C_AS5600.begin(AS5600_SDA, AS5600_SCL);
+  I2C_AS5600.setClock(100000);
   
-  // Инициализация датчика с использованием Wire1
-  as5600.begin(4);  // Не используем направляющий пин
-  
-  // Устанавливаем I2C для датчика
-  as5600.setWire(&Wire1);
+  // Для библиотеки AS5600 версии 0.6.6 используем конструктор с адресом
+  // или просто инициализируем без параметров
   
   // Проверка подключения
-  if (as5600.isConnected()) {
+  delay(100); // Даем время на инициализацию
+  
+  // Простая проверка - попытка чтения регистра
+  I2C_AS5600.beginTransmission(0x36); // Адрес AS5600
+  byte error = I2C_AS5600.endTransmission();
+  
+  if (error == 0) {
     as5600Found = true;
     Serial.println("Датчик AS5600 найден!");
-    Serial.print("Адрес I2C: 0x");
-    Serial.println(as5600.getAddress(), HEX);
+    Serial.println("Адрес I2C: 0x36");
   } else {
     as5600Found = false;
     Serial.println("ОШИБКА: Датчик AS5600 не найден!");
@@ -132,30 +136,32 @@ void initAS5600() {
     Serial.println("VCC -> 3.3V или 5V");
     Serial.println("GND -> GND");
     Serial.println("Адрес I2C: 0x36");
+    Serial.print("Код ошибки I2C: ");
+    Serial.println(error);
   }
 }
 
 // Чтение данных с AS5600
 void readAS5600() {
-  if (as5600Found) {
-    // Чтение сырого значения угла (0-4095)
-    rawAngle = as5600.readAngle();
-    
-    // Чтение угла (0-4095)
-    angle = as5600.readAngle();
-    
-    // Преобразование в градусы (0-360)
-    degrees = (angle * 360.0) / 4096.0;
-    
-    // Проверка наличия магнита
-    magnetDetected = as5600.detectMagnet();
-    
-    // Чтение силы магнита
-    magnetStrength = as5600.readMagnitude();
-    
-    // Чтение статуса
-    status = as5600.readStatus();
-  }
+  if (!as5600Found) return;
+  
+  // Читаем сырое значение угла (0-4095)
+  rawAngle = as5600.rawAngle() * 0.087; // Преобразование в градусы
+  
+  // Читаем обработанный угол
+  angle = as5600.readAngle();
+  
+  // Преобразование в градусы (0-360)
+  degrees = (angle * 360.0) / 4096.0;
+  
+  // Проверка наличия магнита
+  magnetDetected = (as5600.readStatus() & 0x20) != 0;
+  
+  // Чтение силы магнита
+  magnetStrength = as5600.readMagnitude();
+  
+  // Чтение статуса
+  status = as5600.readStatus();
 }
 
 // Вывод данных в Serial Monitor
@@ -164,7 +170,8 @@ void printToSerial() {
   
   if (as5600Found) {
     Serial.print("Сырое значение: ");
-    Serial.println(rawAngle);
+    Serial.print(rawAngle);
+    Serial.println("°");
     
     Serial.print("Угол: ");
     Serial.print(angle);
@@ -187,6 +194,13 @@ void printToSerial() {
     
     Serial.print("Статус: 0x");
     Serial.println(status, HEX);
+    
+    // Расшифровка статуса
+    Serial.print("Статус расшифровка: ");
+    if (status & 0x20) Serial.print("MD ");
+    if (status & 0x10) Serial.print("ML ");
+    if (status & 0x08) Serial.print("MH ");
+    Serial.println();
     
     if (magnetStrength < 100) {
       Serial.println("ВНИМАНИЕ: Слабое магнитное поле!");
@@ -213,11 +227,11 @@ void updateDisplay() {
     if (magnetDetected) {
       // Основной угол большими цифрами
       display.setFont(ArialMT_Plain_24);
-      display.drawString(0, 15, String(degrees, 1) + char(247));
+      display.drawString(0, 15, String(degrees, 1) + "°");
       
       // Сырое значение
       display.setFont(ArialMT_Plain_10);
-      display.drawString(0, 45, "RAW: " + String(rawAngle));
+      display.drawString(0, 45, "RAW: " + String(rawAngle, 1) + "°");
       
       // Информация о магните
       display.drawString(0, 55, "MAG: " + String(magnetStrength));
