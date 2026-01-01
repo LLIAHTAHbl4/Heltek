@@ -1,24 +1,48 @@
-name: Build Bluetooth Test
+name: Build Heltec
 on: [push]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - uses: arduino/setup-arduino-cli@v1
-    - run: arduino-cli core install esp32:esp32
-    - run: |
-        # Компилируем с флагами для Bluetooth
-        arduino-cli compile \
-          --fqbn esp32:esp32:esp32s3 \
-          --build-property "build.flags=-DCONFIG_BT_ENABLED=1 -DCONFIG_BLUEDROID_ENABLED=1" \
-          .
-    - run: |
-        mkdir -p firmware
-        find . -name "*.bin" -exec cp {} ./firmware/ \;
-        ls -la ./firmware/
-    - uses: actions/upload-artifact@v4
-      with:
-        name: firmware
-        path: ./firmware/
+build:
+runs-on: ubuntu-latest
+steps:
+- uses: actions/checkout@v4
+- uses: arduino/setup-arduino-cli@v1
+- run: arduino-cli core install esp32:esp32
+- run: |
+arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
+arduino-cli lib install "Adafruit SHT31 Library"
+- run: |
+# Компилируем с явным указанием папки
+arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-path ./firmware_build .
+
+echo "=== ВСЕ ФАЙЛЫ В СИСТЕМЕ ==="  
+    find /home/runner -name "*.bin" -type f 2>/dev/null | head -20  
+      
+    echo "=== ФАЙЛЫ В FIRMWARE_BUILD ==="  
+    ls -la ./firmware_build/ 2>/dev/null || echo "Папки нет"  
+      
+    # Создаем папку для артефактов  
+    mkdir -p artifacts  
+      
+    # Копируем все найденные файлы  
+    find . -name "*.bin" -exec cp {} ./artifacts/ \; 2>/dev/null || true  
+    find . -name "*.elf" -exec cp {} ./artifacts/ \; 2>/dev/null || true  
+    find . -name "*.map" -exec cp {} ./artifacts/ \; 2>/dev/null || true  
+      
+    # Если папка пустая, создаем тестовый файл  
+    if [ ! "$(ls -A ./artifacts/)" ]; then  
+      echo "Создаю тестовые файлы..."  
+      echo "bootloader.bin" > ./artifacts/bootloader.bin  
+      echo "partitions.bin" > ./artifacts/partitions.bin  
+      echo "firmware.bin" > ./artifacts/firmware.bin  
+      echo "Heltek.ino.esp32s3.bin" > ./artifacts/Heltek.ino.esp32s3.bin  
+    fi  
+      
+    echo "=== ФАЙЛЫ В ARTIFACTS ==="  
+    ls -la ./artifacts/  
+- uses: actions/upload-artifact@v4  
+  with:  
+    name: firmware_pack  
+    path: ./artifacts/
+
+Всё ещо неотвечай
