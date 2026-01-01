@@ -1,47 +1,22 @@
-name: Build Heltec V3.1 with AS5600
-on: [push, pull_request]
+name: Build Heltec Diagnostic
+on: [push]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Setup Arduino CLI
-      uses: arduino/setup-arduino-cli@v1
-      
+    - uses: actions/checkout@v4
+    - uses: arduino/setup-arduino-cli@v1
     - name: Install ESP32 core
       run: arduino-cli core install esp32:esp32
-      
-    - name: Install required libraries
+    - name: Install libraries
       run: |
-        # Библиотека для дисплея SH1106
         arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
-        # Библиотека для датчика AS5600
-        arduino-cli lib install "AS5600"
-      
-    - name: Compile sketch
-      run: |
-        # Создаем папку для сборки
-        mkdir -p build
-        # Компилируем в папку build
-        arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-path ./build .
-      
-    - name: List build files
-      run: |
-        echo "Содержимое папки build:"
-        ls -la ./build/
-        echo "Поиск .bin файлов:"
-        find . -name "*.bin" -type f
-      
-    - name: Upload firmware artifacts
-      if: success()
+    - name: Compile
+      run: arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: firmware
-        path: |
-          ./build/*.bin
-          ./build/*.elf
-        if-no-files-found: warn
+        path: ./Heltek.ino.esp32s3.bin
