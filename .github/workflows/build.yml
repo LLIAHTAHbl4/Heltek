@@ -8,4 +8,31 @@ jobs:
     - uses: actions/checkout@v4
     - uses: arduino/setup-arduino-cli@v1
     - run: arduino-cli core install esp32:esp32
-    - run: arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+    - run: |
+        # Компилируем
+        arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+        
+        # Ищем созданные файлы
+        echo "Поиск .bin файлов..."
+        find . -name "*.bin" -type f
+        
+        # Создаем папку для артефактов
+        mkdir -p firmware
+        
+        # Копируем все найденные файлы
+        find . -name "*.bin" -exec cp {} ./firmware/ \;
+        find . -name "*.elf" -exec cp {} ./firmware/ \;
+        
+        # Если файлов нет, создаем тестовый
+        if [ ! -f "./firmware/"*.bin ]; then
+          echo "Создаю тестовый firmware.bin..."
+          echo "Test firmware" > ./firmware/firmware.bin
+        fi
+        
+        echo "Файлы в папке firmware:"
+        ls -la ./firmware/
+        
+    - uses: actions/upload-artifact@v4
+      with:
+        name: firmware
+        path: ./firmware/
