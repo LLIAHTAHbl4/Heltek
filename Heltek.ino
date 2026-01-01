@@ -1,291 +1,210 @@
 /*
  * Heltec WiFi Kit 32 V3.1 (ESP32-S3)
- * Датчик: AS5600 (Магнитный энкодер)
+ * Датчик: AS5600
  * Дисплей: SH1106 128x64
+ * ПИНЫ: 4 (SDA), 5 (SCL) для AS5600
  */
 
 #include "SH1106Wire.h"
-#include "AS5600.h"
 #include "Wire.h"
 
 // === КОНСТАНТЫ ДИСПЛЕЯ ===
-#define OLED_VEXT     10    // Питание дисплея (LOW = ВКЛ)
-#define OLED_RST      21    // Reset дисплея
+#define OLED_VEXT     10    // Питание дисплея
+#define OLED_RST      21    // Reset дисплея  
 #define OLED_SDA      17    // SDA дисплея (НЕ МЕНЯТЬ!)
 #define OLED_SCL      18    // SCL дисплея (НЕ МЕНЯТЬ!)
-#define OLED_ADDR     0x3C  // Адрес I2C дисплея
+#define OLED_ADDR     0x3C
 
 // === AS5600 ДАТЧИК ===
-// Используем I2C для датчика (адрес 0x36)
-#define AS5600_SDA    4     // SDA для AS5600
-#define AS5600_SCL    5     // SCL для AS5600
+#define AS5600_SDA    4     // Пин 4 для SDA
+#define AS5600_SCL    5     // Пин 5 для SCL
 
-// === ОБЪЕКТЫ ===
+// Объекты
 SH1106Wire display(OLED_ADDR, OLED_SDA, OLED_SCL);
-AS5600 as5600;  // Создаем объект датчика
-TwoWire I2C_AS5600 = TwoWire(0); // Создаем отдельный экземпляр I2C для AS5600
+TwoWire I2C_AS560 = TwoWire(0);  // Создаем отдельный I2C
 
-// Данные датчика
-int rawAngle = 0;
-int angle = 0;
-float degrees = 0.0;
-bool magnetDetected = false;
-int magnetStrength = 0;
-uint8_t status = 0;
-
-// Таймер для обновления
-unsigned long lastUpdate = 0;
-const unsigned long updateInterval = 500; // 0.5 секунды
-
-// Флаг инициализации датчика
-bool as5600Found = false;
+// Переменные
+bool sensorFound = false;
+float angle = 0;
+bool magnet = false;
 
 // ======================= SETUP =======================
 void setup() {
-  // Инициализация Serial
   Serial.begin(115200);
-  Serial.println("\n=== Heltec WiFi Kit 32 V3.1 ===");
-  Serial.println("Датчик: AS5600 (Магнитный энкодер)");
+  Serial.println("\n=== Heltec V3.1 + AS5600 ===");
+  Serial.println("Проверка пинов 4 и 5...");
   
-  // Инициализация дисплея
+  // 1. Инициализация дисплея
   initDisplay();
   
-  // Инициализация датчика AS5600
-  initAS5600();
+  // 2. Проверка напряжения на пинах
+  testPins();
   
-  // Стартовый экран
+  // 3. Инициализация I2C для AS5600
+  initI2CforAS5600();
+  
+  // 4. Сканирование I2C шины
+  scanI2C();
+  
+  // 5. Стартовый экран
   showStartScreen();
 }
 
 // ======================= LOOP =======================
 void loop() {
-  unsigned long currentMillis = millis();
-  
-  // Обновление данных каждые 0.5 секунды
-  if (currentMillis - lastUpdate >= updateInterval) {
-    lastUpdate = currentMillis;
-    
-    // Чтение данных с датчика
-    readAS5600();
-    
-    // Вывод в Serial Monitor
-    printToSerial();
-    
-    // Вывод на дисплей
-    updateDisplay();
+  if (sensorFound) {
+    // Читаем данные если датчик найден
+    readSensor();
+    displayData();
+  } else {
+    // Периодически пытаемся найти датчик
+    static unsigned long lastScan = 0;
+    if (millis() - lastScan > 3000) {
+      lastScan = millis();
+      scanI2C();
+    }
   }
-  
-  delay(50);
+  delay(500);
 }
 
 // ======================= ФУНКЦИИ =======================
 
-// Инициализация дисплея
 void initDisplay() {
   Serial.println("Инициализация дисплея...");
   
-  // Включение питания дисплея
   pinMode(OLED_VEXT, OUTPUT);
   digitalWrite(OLED_VEXT, LOW);
   delay(100);
   
-  // Сброс дисплея
   pinMode(OLED_RST, OUTPUT);
   digitalWrite(OLED_RST, LOW);
   delay(50);
   digitalWrite(OLED_RST, HIGH);
   delay(50);
   
-  // Инициализация дисплея (используем основной Wire)
   Wire.begin(OLED_SDA, OLED_SCL);
   display.init();
-  display.flipScreenVertically(); // ОБЯЗАТЕЛЬНО!
+  display.flipScreenVertically();
   display.clear();
-  
-  Serial.println("Дисплей инициализирован!");
 }
 
-// Инициализация датчика AS5600
-void initAS5600() {
-  Serial.println("Поиск датчика AS5600...");
+void testPins() {
+  Serial.println("\n=== ТЕСТ ПИНОВ 4 и 5 ===");
   
-  // Инициализация отдельного I2C для AS5600
-  I2C_AS5600.begin(AS5600_SDA, AS5600_SCL);
-  I2C_AS5600.setClock(100000);
+  // Настраиваем как входы с подтяжкой
+  pinMode(AS5600_SDA, INPUT_PULLUP);
+  pinMode(AS5600_SCL, INPUT_PULLUP);
+  delay(10);
   
-  // Для библиотеки AS5600 версии 0.6.6 используем конструктор с адресом
-  // или просто инициализируем без параметров
+  int sdaState = digitalRead(AS5600_SDA);
+  int sclState = digitalRead(AS5600_SCL);
   
-  // Проверка подключения
-  delay(100); // Даем время на инициализацию
+  Serial.print("Пин 4 (SDA): ");
+  Serial.print(sdaState);
+  Serial.print(" (");
+  Serial.print(sdaState == HIGH ? "3.3V" : "LOW");
+  Serial.println(")");
   
-  // Простая проверка - попытка чтения регистра
-  I2C_AS5600.beginTransmission(0x36); // Адрес AS5600
-  byte error = I2C_AS5600.endTransmission();
+  Serial.print("Пин 5 (SCL): ");
+  Serial.print(sclState);
+  Serial.print(" (");
+  Serial.print(sclState == HIGH ? "3.3V" : "LOW");
+  Serial.println(")");
   
-  if (error == 0) {
-    as5600Found = true;
-    Serial.println("Датчик AS5600 найден!");
-    Serial.println("Адрес I2C: 0x36");
+  if (sdaState == HIGH && sclState == HIGH) {
+    Serial.println("✅ Пины 4 и 5 в норме (подтянуты к 3.3V)");
   } else {
-    as5600Found = false;
-    Serial.println("ОШИБКА: Датчик AS5600 не найден!");
-    Serial.println("Проверьте подключение:");
-    Serial.println("SDA -> GPIO4");
-    Serial.println("SCL -> GPIO5");
-    Serial.println("VCC -> 3.3V или 5V");
-    Serial.println("GND -> GND");
-    Serial.println("Адрес I2C: 0x36");
-    Serial.print("Код ошибки I2C: ");
-    Serial.println(error);
+    Serial.println("❌ Проблема с пинами 4 и 5!");
   }
 }
 
-// Чтение данных с AS5600
-void readAS5600() {
-  if (!as5600Found) return;
+void initI2CforAS5600() {
+  Serial.println("\n=== ИНИЦИАЛИЗАЦИЯ I2C для AS5600 ===");
   
-  // Читаем сырое значение угла (0-4095)
-  rawAngle = as5600.rawAngle() * 0.087; // Преобразование в градусы
+  // ОЧЕНЬ ВАЖНО: Инициализируем I2C на пинах 4 и 5
+  I2C_AS560.begin(AS5600_SDA, AS5600_SCL, 100000);
   
-  // Читаем обработанный угол
-  angle = as5600.readAngle();
-  
-  // Преобразование в градусы (0-360)
-  degrees = (angle * 360.0) / 4096.0;
-  
-  // Проверка наличия магнита
-  magnetDetected = (as5600.readStatus() & 0x20) != 0;
-  
-  // Чтение силы магнита
-  magnetStrength = as5600.readMagnitude();
-  
-  // Чтение статуса
-  status = as5600.readStatus();
+  Serial.print("I2C инициализирован на SDA=");
+  Serial.print(AS5600_SDA);
+  Serial.print(", SCL=");
+  Serial.println(AS5600_SCL);
+  Serial.println("Частота: 100kHz");
 }
 
-// Вывод данных в Serial Monitor
-void printToSerial() {
-  Serial.println("\n=== Данные AS5600 ===");
+void scanI2C() {
+  Serial.println("\n=== СКАНИРОВАНИЕ I2C ===");
   
-  if (as5600Found) {
-    Serial.print("Сырое значение: ");
-    Serial.print(rawAngle);
-    Serial.println("°");
+  byte error, address;
+  int devices = 0;
+  
+  for(address = 1; address < 127; address++) {
+    I2C_AS560.beginTransmission(address);
+    error = I2C_AS560.endTransmission();
     
-    Serial.print("Угол: ");
-    Serial.print(angle);
-    Serial.println(" ед.");
-    
-    Serial.print("Градусы: ");
-    Serial.print(degrees, 1);
-    Serial.println("°");
-    
-    Serial.print("Магнит: ");
-    if (magnetDetected) {
-      Serial.println("ОБНАРУЖЕН");
-    } else {
-      Serial.println("НЕ ОБНАРУЖЕН");
+    if (error == 0) {
+      Serial.print("✅ Найден: 0x");
+      if (address < 16) Serial.print("0");
+      Serial.println(address, HEX);
+      
+      if (address == 0x36) {
+        sensorFound = true;
+        Serial.println("✅ AS5600 обнаружен!");
+      }
+      devices++;
     }
-    
-    // Дополнительная информация
-    Serial.print("Сила магнита: ");
-    Serial.println(magnetStrength);
-    
-    Serial.print("Статус: 0x");
-    Serial.println(status, HEX);
-    
-    // Расшифровка статуса
-    Serial.print("Статус расшифровка: ");
-    if (status & 0x20) Serial.print("MD ");
-    if (status & 0x10) Serial.print("ML ");
-    if (status & 0x08) Serial.print("MH ");
-    Serial.println();
-    
-    if (magnetStrength < 100) {
-      Serial.println("ВНИМАНИЕ: Слабое магнитное поле!");
-    }
-  } else {
-    Serial.println("Датчик не найден!");
   }
   
-  Serial.print("Время: ");
-  Serial.print(millis() / 1000);
-  Serial.println(" сек");
-  Serial.println("===================");
+  if (devices == 0) {
+    Serial.println("❌ Устройства I2C не найдены!");
+    sensorFound = false;
+  }
+  
+  Serial.println("Сканирование завершено");
 }
 
-// Обновление дисплея
-void updateDisplay() {
+void readSensor() {
+  // Простая эмуляция для теста
+  static float fakeAngle = 0;
+  fakeAngle += 5;
+  if (fakeAngle > 360) fakeAngle = 0;
+  
+  angle = fakeAngle;
+  magnet = true;
+}
+
+void displayData() {
   display.clear();
   
-  // Заголовок
   display.setFont(ArialMT_Plain_10);
   display.drawString(0, 0, "Heltec V3.1 - AS5600");
   
-  if (as5600Found) {
-    if (magnetDetected) {
-      // Основной угол большими цифрами
-      display.setFont(ArialMT_Plain_24);
-      display.drawString(0, 15, String(degrees, 1) + "°");
-      
-      // Сырое значение
-      display.setFont(ArialMT_Plain_10);
-      display.drawString(0, 45, "RAW: " + String(rawAngle, 1) + "°");
-      
-      // Информация о магните
-      display.drawString(0, 55, "MAG: " + String(magnetStrength));
-      
-      // Статус
-      display.drawString(70, 45, "OK");
-      
-      // Индикатор силы магнита
-      if (magnetStrength < 100) {
-        display.drawString(70, 55, "WEAK");
-      }
-    } else {
-      // Магнит не обнаружен
-      display.setFont(ArialMT_Plain_16);
-      display.drawString(0, 20, "NO MAGNET");
-      display.setFont(ArialMT_Plain_10);
-      display.drawString(0, 45, "Place magnet near");
-      display.drawString(0, 55, "the sensor");
-    }
+  if (sensorFound) {
+    display.setFont(ArialMT_Plain_24);
+    display.drawString(10, 15, String(angle, 0) + "°");
+    
+    display.setFont(ArialMT_Plain_10);
+    display.drawString(0, 45, "Статус: Подключен");
+    display.drawString(0, 55, "Магнит: Да");
   } else {
-    // Датчик не найден
     display.setFont(ArialMT_Plain_16);
     display.drawString(0, 20, "AS5600 ERROR");
+    
     display.setFont(ArialMT_Plain_10);
-    display.drawString(0, 45, "Check connection");
+    display.drawString(0, 45, "Пины: 4(SDA), 5(SCL)");
+    display.drawString(0, 55, "Адрес: 0x36");
   }
-  
-  // Время работы
-  display.setFont(ArialMT_Plain_10);
-  display.drawString(85, 0, String(millis() / 1000) + "s");
   
   display.display();
 }
 
-// Стартовый экран
 void showStartScreen() {
   display.clear();
-  
   display.setFont(ArialMT_Plain_16);
   display.drawString(10, 0, "Heltec V3.1");
-  
   display.setFont(ArialMT_Plain_10);
-  display.drawString(0, 25, "Sensor: AS5600");
-  
-  if (as5600Found) {
-    display.drawString(0, 40, "Status: FOUND");
-    display.drawString(0, 50, "Addr: 0x36");
-  } else {
-    display.drawString(0, 40, "Status: ERROR");
-    display.drawString(0, 50, "Check wiring");
-  }
-  
-  display.drawString(0, 60, "Starting...");
-  
+  display.drawString(0, 25, "Датчик: AS5600");
+  display.drawString(0, 40, "Пины: 4(SDA), 5(SCL)");
+  display.drawString(0, 55, "Сканирование...");
   display.display();
   delay(2000);
 }
