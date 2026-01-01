@@ -9,8 +9,26 @@ jobs:
     - uses: arduino/setup-arduino-cli@v1
     - run: arduino-cli core install esp32:esp32
     - run: arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
-    - run: arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+    - run: |
+        # Компилируем
+        echo "Компиляция..."
+        arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+        
+        # Ищем созданный файл
+        echo "Поиск файлов..."
+        find . -name "*.bin" -type f
+        
+        # Переименовываем первый найденный .bin файл
+        FIRST_BIN=$(find . -name "*.bin" -type f | head -1)
+        if [ -f "$FIRST_BIN" ]; then
+          echo "Найден файл: $FIRST_BIN"
+          cp "$FIRST_BIN" ./firmware.bin
+          echo "Создан firmware.bin"
+        else
+          echo "Ошибка: .bin файл не найден!"
+          exit 1
+        fi
     - uses: actions/upload-artifact@v4
       with:
         name: firmware
-        path: ./Heltek.ino.esp32s3.bin
+        path: ./firmware.bin
