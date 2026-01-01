@@ -21,14 +21,15 @@
 
 // === ОБЪЕКТЫ ===
 SH1106Wire display(OLED_ADDR, OLED_SDA, OLED_SCL);
-AS5600 as5600;
+AS5600 as5600;  // Создаем объект датчика
 
 // Данные датчика
 int rawAngle = 0;
 int angle = 0;
-int normalizedAngle = 0;
 float degrees = 0.0;
 bool magnetDetected = false;
+int magnetStrength = 0;
+uint8_t status = 0;
 
 // Таймер для обновления
 unsigned long lastUpdate = 0;
@@ -106,12 +107,15 @@ void initDisplay() {
 void initAS5600() {
   Serial.println("Поиск датчика AS5600...");
   
-  // Инициализация I2C для датчика
+  // Инициализация I2C для датчика (Wire1)
   Wire1.begin(AS5600_SDA, AS5600_SCL);
   Wire1.setClock(100000);
   
-  // Инициализация датчика
-  as5600.begin(&Wire1);  // Используем Wire1
+  // Инициализация датчика с использованием Wire1
+  as5600.begin(4);  // Не используем направляющий пин
+  
+  // Устанавливаем I2C для датчика
+  as5600.setWire(&Wire1);
   
   // Проверка подключения
   if (as5600.isConnected()) {
@@ -137,17 +141,20 @@ void readAS5600() {
     // Чтение сырого значения угла (0-4095)
     rawAngle = as5600.readAngle();
     
-    // Чтение угла в градусах
+    // Чтение угла (0-4095)
     angle = as5600.readAngle();
     
     // Преобразование в градусы (0-360)
     degrees = (angle * 360.0) / 4096.0;
     
-    // Нормализация угла (0-360)
-    normalizedAngle = degrees;
-    
     // Проверка наличия магнита
     magnetDetected = as5600.detectMagnet();
+    
+    // Чтение силы магнита
+    magnetStrength = as5600.readMagnitude();
+    
+    // Чтение статуса
+    status = as5600.readStatus();
   }
 }
 
@@ -167,10 +174,6 @@ void printToSerial() {
     Serial.print(degrees, 1);
     Serial.println("°");
     
-    Serial.print("Нормализовано: ");
-    Serial.print(normalizedAngle);
-    Serial.println("°");
-    
     Serial.print("Магнит: ");
     if (magnetDetected) {
       Serial.println("ОБНАРУЖЕН");
@@ -179,14 +182,13 @@ void printToSerial() {
     }
     
     // Дополнительная информация
-    Serial.print("Статус: 0x");
-    Serial.println(as5600.getStatus(), HEX);
-    
     Serial.print("Сила магнита: ");
-    int strength = as5600.getMagnitude();
-    Serial.println(strength);
+    Serial.println(magnetStrength);
     
-    if (strength < 100) {
+    Serial.print("Статус: 0x");
+    Serial.println(status, HEX);
+    
+    if (magnetStrength < 100) {
       Serial.println("ВНИМАНИЕ: Слабое магнитное поле!");
     }
   } else {
@@ -218,11 +220,15 @@ void updateDisplay() {
       display.drawString(0, 45, "RAW: " + String(rawAngle));
       
       // Информация о магните
-      int strength = as5600.getMagnitude();
-      display.drawString(0, 55, "MAG: " + String(strength));
+      display.drawString(0, 55, "MAG: " + String(magnetStrength));
       
       // Статус
       display.drawString(70, 45, "OK");
+      
+      // Индикатор силы магнита
+      if (magnetStrength < 100) {
+        display.drawString(70, 55, "WEAK");
+      }
     } else {
       // Магнит не обнаружен
       display.setFont(ArialMT_Plain_16);
