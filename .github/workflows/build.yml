@@ -13,10 +13,22 @@ jobs:
     - name: Install libraries
       run: |
         arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
-    - name: Compile
-      run: arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+    - name: Compile sketch
+      run: |
+        echo "Компиляция начата..."
+        arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-path ./firmware .
+        echo "Компиляция завершена"
+        echo "Содержимое папки firmware:"
+        ls -la ./firmware/
+        echo "Копируем все .bin файлы в корень"
+        cp ./firmware/*.bin ./ 2>/dev/null || echo "Нет .bin файлов для копирования"
+        echo "Файлы в корневой папке:"
+        find . -name "*.bin" -type f
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: firmware
-        path: ./*.bin
+        path: |
+          ./firmware/
+          ./*.bin
+        if-no-files-found: warn
