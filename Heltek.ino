@@ -1,6 +1,5 @@
 /*
- * Heltec V3.1 - Один дисплей + AS5600 (имитация)
- * Показывает угол и время
+ * Heltec V3.1 - Реальное чтение AS5600
  */
 
 #include "SH1106Wire.h"
@@ -16,20 +15,28 @@
 #define DISPLAY_ADDR 0x3C
 #define AS5600_ADDR  0x36
 
+// === РЕГИСТРЫ AS5600 ===
+#define AS5600_RAW_ANGLE_REG 0x0C
+#define AS5600_ANGLE_REG     0x0E
+#define AS5600_STATUS_REG    0x0B
+#define AS5600_MAGNITUDE_REG 0x1B
+
 SH1106Wire display(DISPLAY_ADDR, SDA_PIN, SCL_PIN);
 
 // === ПЕРЕМЕННЫЕ ===
 bool as5600Connected = false;
 float currentAngle = 0.0;
+bool magnetDetected = false;
+int magnetStrength = 0;
 unsigned long lastUpdate = 0;
 
 // ======================= SETUP =======================
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n=== Heltec V3.1 - Дисплей + AS5600 ===");
+  Serial.println("\n=== Heltec V3.1 - AS5600 реальный ===");
   
   initDisplay();
-  scanI2C();
+  checkAS5600();
   showStartScreen();
 }
 
@@ -41,11 +48,11 @@ void loop() {
     lastUpdate = now;
     
     if (as5600Connected) {
-      // Имитация чтения AS5600
-      simulateAS5600();
+      readAS5600();
     }
     
     updateDisplay();
+    printToSerial();
   }
   
   delay(1);
@@ -70,59 +77,76 @@ void initDisplay() {
   display.clear();
 }
 
-void scanI2C() {
-  Serial.println("Сканирование I2C...");
-  
-  for (byte addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    byte error = Wire.endTransmission();
-    
-    if (error == 0) {
-      Serial.print("Найден: 0x");
-      if (addr < 16) Serial.print("0");
-      Serial.print(addr, HEX);
-      
-      if (addr == DISPLAY_ADDR) Serial.print(" (Дисплей)");
-      if (addr == AS5600_ADDR) {
-        Serial.print(" (AS5600!)");
-        as5600Connected = true;
-      }
-      
-      Serial.println();
-    }
+void checkAS5600() {
+  Wire.beginTransmission(AS5600_ADDR);
+  if (Wire.endTransmission() == 0) {
+    as5600Connected = true;
+    Serial.println("AS5600 найден!");
+  } else {
+    as5600Connected = false;
+    Serial.println("AS5600 не найден!");
   }
+}
+
+uint16_t readRegister(uint8_t reg) {
+  Wire.beginTransmission(AS5600_ADDR);
+  Wire.write(reg);
+  Wire.endTransmission(false);
+  
+  Wire.requestFrom(AS5600_ADDR, 2);
+  if (Wire.available() >= 2) {
+    uint8_t highByte = Wire.read();
+    uint8_t lowByte = Wire.read();
+    return (highByte << 8) | lowByte;
+  }
+  return 0;
+}
+
+uint8_t readStatus() {
+  Wire.beginTransmission(AS5600_ADDR);
+  Wire.write(AS5600_STATUS_REG);
+  Wire.endTransmission(false);
+  
+  Wire.requestFrom(AS5600_ADDR, 1);
+  if (Wire.available()) {
+    return Wire.read();
+  }
+  return 0;
+}
+
+void readAS5600() {
+  // Читаем сырой угол (0-4095)
+  uint16_t rawAngle = readRegister(AS5600_RAW_ANGLE_REG);
+  
+  // Конвертируем в градусы (0-360)
+  currentAngle = (rawAngle * 360.0) / 4096.0;
+  
+  // Читаем статус магнита
+  uint8_t status = readStatus();
+  magnetDetected = (status & 0x20) != 0; // Бит 5: MD (Magnet Detected)
+  
+  // Читаем силу магнита
+  magnetStrength = readRegister(AS5600_MAGNITUDE_REG);
 }
 
 void showStartScreen() {
   display.clear();
   display.setFont(ArialMT_Plain_16);
-  display.drawString(10, 0, "Heltec V3.1");
+  display.drawString(10, 0, "AS5600 Тест");
   
   display.setFont(ArialMT_Plain_10);
-  display.drawString(0, 25, "Дисплей: 0x3C");
-  
   if (as5600Connected) {
-    display.drawString(0, 40, "AS5600: Найден");
-    display.drawString(0, 55, "Адрес: 0x36");
+    display.drawString(0, 25, "Датчик: Найден");
+    display.drawString(0, 40, "Адрес: 0x36");
+    display.drawString(0, 55, "Поднеси магнит");
   } else {
-    display.drawString(0, 40, "AS5600: Нет");
-    display.drawString(0, 55, "Имитация данных");
+    display.drawString(0, 25, "Датчик: Не найден");
+    display.drawString(0, 40, "Проверь подключение");
+    display.drawString(0, 55, "Адрес: 0x36");
   }
   
   display.display();
   delay(2000);
-}
-
-void simulateAS5600() {
-  // Имитация вращения от 0 до 360 градусов
-  static float angle = 0.0;
-  angle += 1.2; // Скорость вращения
-  
-  if (angle > 360.0) {
-    angle = 0.0;
-  }
-  
-  currentAngle = angle;
 }
 
 void updateDisplay() {
@@ -147,15 +171,32 @@ void updateDisplay() {
   String angleStr = String(currentAngle, 1) + "°";
   display.drawString(10, 15, angleStr);
   
-  // Статус внизу
+  // Статус магнита
   display.setFont(ArialMT_Plain_10);
-  if (as5600Connected) {
-    display.drawString(0, 45, "AS5600: Подключен");
-    display.drawString(0, 55, "Реальные данные");
+  if (magnetDetected) {
+    display.drawString(0, 45, "Магнит: ДА");
+    display.drawString(50, 45, "Сила: " + String(magnetStrength));
   } else {
-    display.drawString(0, 45, "AS5600: Не найден");
-    display.drawString(0, 55, "Имитация: " + angleStr);
+    display.drawString(0, 45, "Магнит: НЕТ");
+  }
+  
+  // Индикатор подключения
+  if (as5600Connected) {
+    display.drawString(0, 55, "AS5600: OK");
+  } else {
+    display.drawString(0, 55, "AS5600: НЕТ");
   }
   
   display.display();
+}
+
+void printToSerial() {
+  Serial.print("Угол: ");
+  Serial.print(currentAngle, 1);
+  Serial.print("° | Магнит: ");
+  Serial.print(magnetDetected ? "ДА" : "НЕТ");
+  Serial.print(" | Сила: ");
+  Serial.print(magnetStrength);
+  Serial.print(" | RAW: ");
+  Serial.println(int(currentAngle * 4096 / 360));
 }
