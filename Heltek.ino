@@ -7,12 +7,12 @@
 
 // === ВЫБЕРИ ВАРИАНТ ПОДКЛЮЧЕНИЯ ===
 // Вариант 1: К физическим пинам 14,15
-#define TEST_SDA 4  // GPIO4 (физический пин 15)
-#define TEST_SCL 5  // GPIO5 (физический пин 14)
+//#define TEST_SDA 4  // GPIO4 (физический пин 15)
+//#define TEST_SCL 5  // GPIO5 (физический пин 14)
 
-// Вариант 2: К физическим пинам 12,13
-// #define TEST_SDA 7  // GPIO7 (физический пин 12)
-// #define TEST_SCL 6  // GPIO6 (физический пин 13)
+Вариант 2: К физическим пинам 12,13
+#define TEST_SDA 7  // GPIO7 (физический пин 12)
+#define TEST_SCL 6  // GPIO6 (физический пин 13)
 
 void setup() {
   Serial.begin(115200);
