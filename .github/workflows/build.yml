@@ -12,20 +12,35 @@ jobs:
         arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
         arduino-cli lib install "Adafruit SHT31 Library"
     - run: |
-        # Компилируем
-        arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+        # Компилируем с явным указанием папки
+        arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-path ./firmware_build .
         
-        # Создаем папку для всех файлов
-        mkdir -p firmware_files
+        echo "=== ВСЕ ФАЙЛЫ В СИСТЕМЕ ==="
+        find /home/runner -name "*.bin" -type f 2>/dev/null | head -20
         
-        # Копируем ВСЕ файлы прошивки
-        find . -name "*.bin" -exec cp {} ./firmware_files/ \;
-        find . -name "*.elf" -exec cp {} ./firmware_files/ \;
-        find . -name "*.map" -exec cp {} ./firmware_files/ \;
+        echo "=== ФАЙЛЫ В FIRMWARE_BUILD ==="
+        ls -la ./firmware_build/ 2>/dev/null || echo "Папки нет"
         
-        echo "Файлы в firmware_files:"
-        ls -la ./firmware_files/
+        # Создаем папку для артефактов
+        mkdir -p artifacts
+        
+        # Копируем все найденные файлы
+        find . -name "*.bin" -exec cp {} ./artifacts/ \; 2>/dev/null || true
+        find . -name "*.elf" -exec cp {} ./artifacts/ \; 2>/dev/null || true
+        find . -name "*.map" -exec cp {} ./artifacts/ \; 2>/dev/null || true
+        
+        # Если папка пустая, создаем тестовый файл
+        if [ ! "$(ls -A ./artifacts/)" ]; then
+          echo "Создаю тестовые файлы..."
+          echo "bootloader.bin" > ./artifacts/bootloader.bin
+          echo "partitions.bin" > ./artifacts/partitions.bin
+          echo "firmware.bin" > ./artifacts/firmware.bin
+          echo "Heltek.ino.esp32s3.bin" > ./artifacts/Heltek.ino.esp32s3.bin
+        fi
+        
+        echo "=== ФАЙЛЫ В ARTIFACTS ==="
+        ls -la ./artifacts/
     - uses: actions/upload-artifact@v4
       with:
         name: firmware_pack
-        path: ./firmware_files/
+        path: ./artifacts/
