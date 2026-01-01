@@ -1,7 +1,7 @@
 /*
  * Heltec WiFi Kit 32 V3.1 - ДВА ДИСПЛЕЯ на одной шине I2C
  * Встроенный SH1106 и дополнительный SSD1306
- * Оба на пинах 17,18 но с разными адресами
+ * Оба на пинах 17,18
  */
 
 #include "SH1106Wire.h"
@@ -14,14 +14,13 @@
 #define OLED_VEXT      10  // Питание дисплея
 #define OLED_RST       21  // Reset дисплея
 
-// Адреса дисплеев (пробуй менять если не работает)
-#define DISPLAY1_ADDR  0x3C  // Встроенный SH1106
-#define DISPLAY2_ADDR  0x3D  // Дополнительный SSD1306
-// ИЛИ попробуй оба на 0x3C если второй не отвечает
+// Адреса дисплеев
+uint8_t display1_addr = 0x3C;  // Встроенный SH1106
+uint8_t display2_addr = 0x3D;  // Дополнительный SSD1306 (пробуем 0x3C если не работает)
 
 // Объекты дисплеев
-SH1106Wire display1(DISPLAY1_ADDR, SDA_PIN, SCL_PIN);  // Встроенный
-SSD1306Wire display2(DISPLAY2_ADDR, SDA_PIN, SCL_PIN); // Дополнительный
+SH1106Wire display1(display1_addr, SDA_PIN, SCL_PIN);  // Встроенный
+SSD1306Wire display2(display2_addr, SDA_PIN, SCL_PIN); // Дополнительный
 
 // === ПЕРЕМЕННЫЕ ===
 bool display1OK = false;
@@ -32,11 +31,11 @@ unsigned long lastMillis = 0;
 void setup() {
   Serial.begin(115200);
   Serial.println("\n=== HELTEC V3.1 - ДВА ДИСПЛЕЯ ===");
-  Serial.println("Оба на пинах 17,18, разные адреса");
+  Serial.println("Оба на пинах 17,18");
   
   // Инициализация I2C
   Wire.begin(SDA_PIN, SCL_PIN);
-  Wire.setClock(400000); // Быстрый I2C для двух дисплеев
+  Wire.setClock(400000); // Быстрый I2C
   
   // Инициализация дисплеев
   initDisplays();
@@ -52,7 +51,7 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
   
-  // Обновляем каждые 50мс для плавного отображения времени
+  // Обновляем каждые 50мс для плавного времени
   if (currentMillis - lastMillis >= 50) {
     lastMillis = currentMillis;
     
@@ -83,7 +82,7 @@ void initDisplays() {
   
   // 3. Инициализация встроенного дисплея (SH1106)
   Serial.print("Дисплей 1 (SH1106, адрес 0x");
-  Serial.print(DISPLAY1_ADDR, HEX);
+  Serial.print(display1_addr, HEX);
   Serial.print(")... ");
   
   display1.init();
@@ -91,7 +90,7 @@ void initDisplays() {
   display1.clear();
   
   // Проверяем подключение
-  Wire.beginTransmission(DISPLAY1_ADDR);
+  Wire.beginTransmission(display1_addr);
   if (Wire.endTransmission() == 0) {
     display1OK = true;
     Serial.println("OK ✅");
@@ -102,35 +101,42 @@ void initDisplays() {
   
   // 4. Инициализация дополнительного дисплея (SSD1306)
   Serial.print("Дисплей 2 (SSD1306, адрес 0x");
-  Serial.print(DISPLAY2_ADDR, HEX);
+  Serial.print(display2_addr, HEX);
   Serial.print(")... ");
   
+  // Пробуем инициализировать
   display2.init();
   display2.flipScreenVertically();
   display2.clear();
   
   // Проверяем подключение
-  Wire.beginTransmission(DISPLAY2_ADDR);
-  if (Wire.endTransmission() == 0) {
+  Wire.beginTransmission(display2_addr);
+  byte error = Wire.endTransmission();
+  
+  if (error == 0) {
     display2OK = true;
     Serial.println("OK ✅");
   } else {
     display2OK = false;
     Serial.println("ERROR ❌");
     
-    // Пробуем альтернативный адрес
+    // Пробуем альтернативный адрес 0x3C
     Serial.print("Пробую адрес 0x3C... ");
-    display2 = SSD1306Wire(0x3C, SDA_PIN, SCL_PIN);
+    display2_addr = 0x3C;
+    
+    // Пересоздаем объект дисплея с новым адресом
+    display2 = SSD1306Wire(display2_addr, SDA_PIN, SCL_PIN);
     display2.init();
     display2.flipScreenVertically();
+    display2.clear();
     
-    Wire.beginTransmission(0x3C);
+    Wire.beginTransmission(display2_addr);
     if (Wire.endTransmission() == 0) {
       display2OK = true;
-      DISPLAY2_ADDR = 0x3C;
       Serial.println("OK ✅ (оба на 0x3C)");
     } else {
       Serial.println("ERROR ❌");
+      display2OK = false;
     }
   }
 }
@@ -148,8 +154,8 @@ void scanI2C() {
       if (addr < 16) Serial.print("0");
       Serial.print(addr, HEX);
       
-      if (addr == DISPLAY1_ADDR) Serial.print(" (Дисплей 1)");
-      if (addr == DISPLAY2_ADDR) Serial.print(" (Дисплей 2)");
+      if (addr == display1_addr) Serial.print(" (Дисплей 1)");
+      if (addr == display2_addr) Serial.print(" (Дисплей 2)");
       
       Serial.println();
       found++;
@@ -173,7 +179,7 @@ void showStartScreens() {
     display1.drawString(10, 0, "ДИСПЛЕЙ 1");
     display1.setFont(ArialMT_Plain_10);
     display1.drawString(0, 25, "Встроенный SH1106");
-    display1.drawString(0, 40, "Адрес: 0x" + String(DISPLAY1_ADDR, HEX));
+    display1.drawString(0, 40, "Адрес: 0x" + String(display1_addr, HEX));
     display1.drawString(0, 55, "ПРИВЕТ!");
     display1.display();
   }
@@ -184,7 +190,7 @@ void showStartScreens() {
     display2.drawString(10, 0, "ДИСПЛЕЙ 2");
     display2.setFont(ArialMT_Plain_10);
     display2.drawString(0, 25, "Дополнительный");
-    display2.drawString(0, 40, "Адрес: 0x" + String(DISPLAY2_ADDR, HEX));
+    display2.drawString(0, 40, "Адрес: 0x" + String(display2_addr, HEX));
     display2.drawString(0, 55, "ПРИВЕТ!");
     display2.display();
   }
@@ -218,7 +224,7 @@ void updateDisplay1() {
   // Информация внизу
   display1.setFont(ArialMT_Plain_10);
   display1.drawString(0, 45, "Пины: 17,18");
-  display1.drawString(0, 55, "Адрес: 0x" + String(DISPLAY1_ADDR, HEX));
+  display1.drawString(0, 55, "Адрес: 0x" + String(display1_addr, HEX));
   
   display1.display();
 }
@@ -249,7 +255,7 @@ void updateDisplay2() {
   // Информация внизу
   display2.setFont(ArialMT_Plain_10);
   display2.drawString(0, 45, "На одной шине I2C");
-  display2.drawString(0, 55, "Адрес: 0x" + String(DISPLAY2_ADDR, HEX));
+  display2.drawString(0, 55, "Адрес: 0x" + String(display2_addr, HEX));
   
   display2.display();
 }
