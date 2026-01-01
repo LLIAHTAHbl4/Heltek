@@ -332,4 +332,3 @@ Serial.print("V (");
 Serial.print(batteryPercent);
 Serial.println("%)");
 }
-Пока ничего не пеши в чат, добавлю ещо информации, потом скажу когда можешь отвечать
