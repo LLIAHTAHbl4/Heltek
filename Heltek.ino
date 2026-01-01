@@ -33,8 +33,8 @@ Adafruit_SHT31 sht31 = Adafruit_SHT31();
 bool as5600Connected = false;
 bool sht31Connected = false;
 float currentAngle = 0.0;
-bool magnetDetected = false;
 int magnetStrength = 0;
+int magnetPercent = 0;
 float temperature = 0.0;
 float humidity = 0.0;
 unsigned long startTime = 0;
@@ -178,12 +178,15 @@ void readAS5600() {
   // Конвертируем в градусы (0-360)
   currentAngle = (rawAngle * 360.0) / 4096.0;
   
-  // Читаем статус магнита
-  uint8_t status = readAS5600Status();
-  magnetDetected = (status & 0x20) != 0; // Бит 5: MD (Magnet Detected)
-  
-  // Читаем силу магнита
+  // Читаем силу магнита (0-4095)
   magnetStrength = readAS5600Register(AS5600_MAGNITUDE_REG);
+  
+  // Конвертируем в проценты (0-100%)
+  // AS5600: 0-4095, нормальные значения ~100-2000
+  // 0-100% относительно максимального значения 2000
+  magnetPercent = map(magnetStrength, 0, 2000, 0, 100);
+  if (magnetPercent < 0) magnetPercent = 0;
+  if (magnetPercent > 100) magnetPercent = 100;
 }
 
 void readSHT31() {
@@ -219,25 +222,21 @@ void updateDisplay() {
   
   // ===== ЛЕВАЯ КОЛОНКА (AS5600) =====
   
-  // 1. Сила магнита (верхняя строка)
-  display.setFont(ArialMT_Plain_10);
-  display.drawString(0, 0, "MAG:");
-  display.drawString(30, 0, String(magnetStrength));
+  // 1. Сила магнита в процентах (верхняя строка)
+  display.setFont(ArialMT_Plain_16);
+  String magStr = String(magnetPercent) + "%";
+  display.drawString(5, 0, magStr);
   
   // 2. Угол в градусах (средняя строка)
-  display.setFont(ArialMT_Plain_16);
+  display.setFont(ArialMT_Plain_24);
   String angleStr = String(currentAngle, 1) + "°";
-  int angleX = 0;
-  if (currentAngle < 100) angleX = 10;
-  display.drawString(angleX, 15, angleStr);
   
-  // Индикатор магнита
-  display.setFont(ArialMT_Plain_10);
-  if (magnetDetected) {
-    display.drawString(0, 35, "M:ON");
-  } else {
-    display.drawString(0, 35, "M:OFF");
-  }
+  // Центрируем угол в зависимости от длины
+  int angleX = 0;
+  if (currentAngle < 10) angleX = 15;
+  else if (currentAngle < 100) angleX = 5;
+  
+  display.drawString(angleX, 20, angleStr);
   
   // 3. Таймер (нижняя строка)
   unsigned long elapsed = (millis() - startTime) / 1000; // секунды
@@ -254,6 +253,7 @@ void updateDisplay() {
   if (seconds < 10) timerStr += "0";
   timerStr += String(seconds);
   
+  display.setFont(ArialMT_Plain_10);
   display.drawString(0, 50, timerStr);
   
   // ===== ПРАВАЯ КОЛОНКА (SHT31) =====
@@ -261,10 +261,10 @@ void updateDisplay() {
   // 1. Температура (верхняя строка)
   display.setFont(ArialMT_Plain_16);
   if (temperature != -999) {
-    String tempStr = String(temperature, 1) + "C";
+    String tempStr = String(temperature, 1) + "°C";
     display.drawString(70, 0, tempStr);
   } else {
-    display.drawString(70, 0, "--C");
+    display.drawString(70, 0, "--°C");
   }
   
   // 2. Влажность (нижняя строка)
@@ -276,27 +276,22 @@ void updateDisplay() {
     display.drawString(70, 25, "--%");
   }
   
-  // Статус датчиков внизу справа
-  display.setFont(ArialMT_Plain_10);
-  display.drawString(70, 50, "A:" + String(as5600Connected ? "1" : "0"));
-  display.drawString(90, 50, "S:" + String(sht31Connected ? "1" : "0"));
-  
   display.display();
 }
 
 void printToSerial() {
   Serial.print("Угол: ");
   Serial.print(currentAngle, 1);
-  Serial.print("° | Магнит: ");
-  Serial.print(magnetDetected ? "ДА" : "НЕТ");
-  Serial.print("(");
+  Serial.print("° | MAG: ");
+  Serial.print(magnetPercent);
+  Serial.print("% (");
   Serial.print(magnetStrength);
   Serial.print(")");
   
   if (sht31Connected && temperature != -999 && humidity != -999) {
     Serial.print(" | Темп: ");
     Serial.print(temperature, 1);
-    Serial.print("C | Влаг: ");
+    Serial.print("°C | Влаг: ");
     Serial.print(humidity, 1);
     Serial.print("%");
   }
