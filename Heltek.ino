@@ -1,88 +1,109 @@
 /*
- * Тест пина батареи с Serial
- * Простая версия без Bluetooth
+ * Тест батареи с Bluetooth
+ * ESP32 Bluetooth Serial
  */
 
+#include <BluetoothSerial.h>
+
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error Bluetooth не включен в настройках!
+#endif
+
+BluetoothSerial SerialBT;
+const char* deviceName = "Heltec_Battery_Test";
+
 void setup() {
+  // Инициализация Serial
   Serial.begin(115200);
-  Serial.println("\n=== Battery Pin Test ===");
-  Serial.println("Подключи USB для Serial Monitor");
-  Serial.println("Ожидаем пин с ~1.94V (3.87V / 2)");
-  Serial.println();
+  Serial.println("\n=== Тест батареи с Bluetooth ===");
   
+  // Инициализация Bluetooth
+  SerialBT.begin(deviceName);
+  Serial.print("Bluetooth устройство: ");
+  Serial.println(deviceName);
+  Serial.println("Подключитесь для просмотра данных");
+  
+  SerialBT.println("=== Heltec V3.1 Battery Test ===");
+  SerialBT.println("Батарея: ожидается ~3.87V");
+  SerialBT.println("Поиск пина с ~1.94V");
+  
+  // Настройка АЦП
   analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
+  
   delay(1000);
 }
 
 void loop() {
   static unsigned long lastScan = 0;
   
-  if (millis() - lastScan >= 2000) {
+  // Сканируем каждые 3 секунды
+  if (millis() - lastScan >= 3000) {
     lastScan = millis();
     
-    Serial.print("\n[");
-    Serial.print(millis() / 1000);
-    Serial.println("s] Сканирование...");
+    scanBatteryPins();
     
-    // Тестируем основные пины
-    testPin(1);
-    testPin(2);
-    testPin(3);
-    testPin(4);
-    testPin(5);
-    testPin(6);
-    testPin(7);
-    testPin(8);
-    testPin(9);
-    testPin(10);
-    testPin(14);
-    testPin(15);
-    testPin(16);
-    testPin(17);
-    testPin(18);
-    testPin(19);
-    testPin(20);
-    testPin(21);
-    testPin(33);
-    testPin(34);
-    testPin(35);
-    testPin(36);
-    testPin(39);
-    
-    Serial.println("Следующее сканирование через 2с");
+    // Отправляем в Bluetooth
+    if (SerialBT.connected()) {
+      SerialBT.print("\nСледующее сканирование через 3с... [");
+      SerialBT.print(millis() / 1000);
+      SerialBT.println("с]");
+    }
   }
   
   delay(100);
 }
 
-void testPin(int pin) {
-  // Усредняем 3 измерения
-  long total = 0;
-  for (int i = 0; i < 3; i++) {
-    total += analogRead(pin);
-    delay(1);
+void scanBatteryPins() {
+  // Основные пины для проверки
+  int testPins[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 19, 20, 21};
+  int pinCount = sizeof(testPins) / sizeof(testPins[0]);
+  
+  bool foundBattery = false;
+  
+  Serial.println("\n--- Сканирование пинов ---");
+  
+  for (int i = 0; i < pinCount; i++) {
+    int pin = testPins[i];
+    checkPinForBattery(pin, foundBattery);
   }
   
-  int adcValue = total / 3;
+  if (!foundBattery) {
+    Serial.println("Пин батареи не найден (ожидаем ~1.94V)");
+    SerialBT.println("Пин батареи не найден!");
+  }
+}
+
+void checkPinForBattery(int pin, bool &found) {
+  // Усредняем 5 измерений
+  long total = 0;
+  for (int i = 0; i < 5; i++) {
+    total += analogRead(pin);
+    delay(2);
+  }
+  
+  int adcValue = total / 5;
   float voltage = adcValue * (3.3 / 4095.0);
   
-  // Ищем напряжение около 1.94V
+  // Ищем напряжение около 1.94V (3.87V / 2)
   if (voltage > 1.8 && voltage < 2.1) {
-    Serial.print(">>> ВОЗМОЖНО БАТАРЕЯ: GPIO");
-    Serial.print(pin);
-    Serial.print(" = ");
-    Serial.print(voltage, 3);
-    Serial.print("V -> Батарея: ");
-    Serial.print(voltage * 2.0, 2);
-    Serial.println("V");
-  }
-  // Показываем все пины с напряжением > 0.5V
-  else if (voltage > 0.5) {
-    Serial.print("GPIO");
-    if (pin < 10) Serial.print("0");
-    Serial.print(pin);
-    Serial.print(": ");
-    Serial.print(voltage, 2);
-    Serial.println("V");
+    found = true;
+    
+    String message = ">>> БАТАРЕЯ НАЙДЕНА: GPIO";
+    message += pin;
+    message += " = ";
+    message += String(voltage, 3);
+    message += "V (ADC: ";
+    message += adcValue;
+    message += ")";
+    message += " -> Батарея: ";
+    message += String(voltage * 2.0, 2);
+    message += "V";
+    
+    Serial.println(message);
+    
+    if (SerialBT.connected()) {
+      SerialBT.println(message);
+    }
   }
 }
