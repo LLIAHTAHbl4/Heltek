@@ -1,6 +1,6 @@
 /*
  * Heltec WiFi Kit 32 V3.1
- * AS5600 (магнитный энкодер) + SHT31 (температура/влажность)
+ * AS5600 (магнитный энкодер) + SHT31 (температура/влажность) + Батарея
  * Оба на пинах 17,18
  */
 
@@ -13,6 +13,7 @@
 #define SCL_PIN   18
 #define OLED_VEXT 10  // Питание дисплея
 #define OLED_RST  21  // Reset дисплея
+#define BAT_ADC   1   // Пин измерения батареи (GPIO1 = ADC1_CH0)
 
 // === АДРЕСА ===
 #define DISPLAY_ADDR 0x3C
@@ -24,6 +25,11 @@
 #define AS5600_ANGLE_REG     0x0E
 #define AS5600_STATUS_REG    0x0B
 #define AS5600_MAGNITUDE_REG 0x1B
+
+// === КАЛИБРОВКА АККУМУЛЯТОРА ===
+#define BATTERY_MAX_VOLTAGE 4.2  // Максимальное напряжение Li-ion банки
+#define BATTERY_MIN_VOLTAGE 3.0  // Минимальное напряжение Li-ion банки
+#define VOLTAGE_DIVIDER_RATIO 2.0 // Делитель напряжения (если есть)
 
 // === ОБЪЕКТЫ ===
 SH1106Wire display(DISPLAY_ADDR, SDA_PIN, SCL_PIN);
@@ -37,13 +43,20 @@ int magnetStrength = 0;
 int magnetPercent = 0;
 float temperature = 0.0;
 float humidity = 0.0;
+float batteryVoltage = 0.0;
+int batteryPercent = 0;
 unsigned long startTime = 0;
 unsigned long lastUpdate = 0;
+unsigned long lastBatteryRead = 0;
 
 // ======================= SETUP =======================
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n=== Heltec V3.1 - AS5600 + SHT31 ===");
+  Serial.println("\n=== Heltec V3.1 - AS5600 + SHT31 + Батарея ===");
+  
+  // Настройка АЦП для батареи
+  analogReadResolution(12); // 12 бит (0-4095)
+  analogSetAttenuation(ADC_11db); // Диапазон до 3.9V
   
   initDisplay();
   initSensors();
@@ -65,6 +78,12 @@ void loop() {
     
     if (sht31Connected) {
       readSHT31();
+    }
+    
+    // Чтение батареи каждые 2 секунды
+    if (now - lastBatteryRead >= 2000) {
+      lastBatteryRead = now;
+      readBattery();
     }
     
     updateDisplay();
@@ -111,38 +130,15 @@ void initSensors() {
     sht31Connected = true;
     Serial.println("SHT31 найден (0x44)");
   } else {
-    sht31Connected = false;
-    Serial.println("SHT31 не найден");
-  }
-  
-  // Сканирование всех устройств
-  scanI2C();
-}
-
-void scanI2C() {
-  Serial.println("Сканирование I2C шины:");
-  int found = 0;
-  
-  for (byte addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    byte error = Wire.endTransmission();
-    
-    if (error == 0) {
-      Serial.print("  0x");
-      if (addr < 16) Serial.print("0");
-      Serial.print(addr, HEX);
-      
-      if (addr == DISPLAY_ADDR) Serial.print(" (Дисплей)");
-      if (addr == AS5600_ADDR) Serial.print(" (AS5600)");
-      if (addr == SHT31_ADDR) Serial.print(" (SHT31)");
-      
-      Serial.println();
-      found++;
+    // Пробуем альтернативный адрес
+    if (sht31.begin(0x45)) {
+      sht31Connected = true;
+      Serial.println("SHT31 найден (0x45)");
+    } else {
+      sht31Connected = false;
+      Serial.println("SHT31 не найден");
     }
   }
-  
-  Serial.print("Всего устройств: ");
-  Serial.println(found);
 }
 
 uint16_t readAS5600Register(uint8_t reg) {
@@ -183,7 +179,6 @@ void readAS5600() {
   
   // Конвертируем в проценты (0-100%)
   // AS5600: 0-4095, нормальные значения ~100-2000
-  // 0-100% относительно максимального значения 2000
   magnetPercent = map(magnetStrength, 0, 2000, 0, 100);
   if (magnetPercent < 0) magnetPercent = 0;
   if (magnetPercent > 100) magnetPercent = 100;
@@ -200,6 +195,33 @@ void readSHT31() {
   }
 }
 
+void readBattery() {
+  // Чтение напряжения с АЦП
+  int adcValue = analogRead(BAT_ADC);
+  
+  // Конвертация в напряжение (для ESP32-S3, 12 бит, 3.3V)
+  // Коэффициент зависит от конкретной платы Heltec
+  float voltage = adcValue * (3.3 / 4095.0);
+  
+  // Если есть делитель напряжения, учитываем его
+  batteryVoltage = voltage * VOLTAGE_DIVIDER_RATIO;
+  
+  // Расчет процента заряда (линейная аппроксимация)
+  batteryPercent = mapFloat(batteryVoltage, BATTERY_MIN_VOLTAGE, BATTERY_MAX_VOLTAGE, 0, 100);
+  if (batteryPercent < 0) batteryPercent = 0;
+  if (batteryPercent > 100) batteryPercent = 100;
+  
+  Serial.print("Батарея: ");
+  Serial.print(batteryVoltage, 2);
+  Serial.print("V (");
+  Serial.print(batteryPercent);
+  Serial.println("%)");
+}
+
+int mapFloat(float x, float in_min, float in_max, int out_min, int out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
 void showStartScreen() {
   display.clear();
   display.setFont(ArialMT_Plain_16);
@@ -208,7 +230,7 @@ void showStartScreen() {
   display.setFont(ArialMT_Plain_10);
   display.drawString(0, 25, "AS5600: " + String(as5600Connected ? "OK" : "NO"));
   display.drawString(0, 40, "SHT31: " + String(sht31Connected ? "OK" : "NO"));
-  display.drawString(0, 55, "Загрузка...");
+  display.drawString(0, 55, "Батарея: тест...");
   
   display.display();
   delay(2000);
@@ -222,13 +244,12 @@ void updateDisplay() {
   
   // ===== ЛЕВАЯ КОЛОНКА (AS5600) =====
   
-  // 1. Сила магнита в процентах (верхняя строка)
+  // 1. Сила магнита в процентах (верхняя строка) - шрифт 16
   display.setFont(ArialMT_Plain_16);
   String magStr = String(magnetPercent) + "%";
   display.drawString(5, 0, magStr);
   
-  // 2. Угол в градусах (средняя строка)
-  display.setFont(ArialMT_Plain_24);
+  // 2. Угол в градусах (средняя строка) - ТЕПЕРЬ ТОТ ЖЕ ШРИФТ 16
   String angleStr = String(currentAngle, 1) + "°";
   
   // Центрируем угол в зависимости от длины
@@ -238,7 +259,7 @@ void updateDisplay() {
   
   display.drawString(angleX, 20, angleStr);
   
-  // 3. Таймер (нижняя строка)
+  // 3. Таймер (нижняя строка) - шрифт 10
   unsigned long elapsed = (millis() - startTime) / 1000; // секунды
   unsigned long hours = elapsed / 3600;
   unsigned long minutes = (elapsed % 3600) / 60;
@@ -256,9 +277,9 @@ void updateDisplay() {
   display.setFont(ArialMT_Plain_10);
   display.drawString(0, 50, timerStr);
   
-  // ===== ПРАВАЯ КОЛОНКА (SHT31) =====
+  // ===== ПРАВАЯ КОЛОНКА (SHT31 + Батарея) =====
   
-  // 1. Температура (верхняя строка)
+  // 1. Температура (верхняя строка) - шрифт 16
   display.setFont(ArialMT_Plain_16);
   if (temperature != -999) {
     String tempStr = String(temperature, 1) + "°C";
@@ -267,14 +288,18 @@ void updateDisplay() {
     display.drawString(70, 0, "--°C");
   }
   
-  // 2. Влажность (нижняя строка)
-  display.setFont(ArialMT_Plain_16);
+  // 2. Влажность (средняя строка) - шрифт 16
   if (humidity != -999) {
     String humStr = String(humidity, 1) + "%";
     display.drawString(70, 25, humStr);
   } else {
     display.drawString(70, 25, "--%");
   }
+  
+  // 3. Батарея (нижняя строка) - шрифт 10 (как таймер)
+  display.setFont(ArialMT_Plain_10);
+  String batStr = String(batteryVoltage, 1) + "V/" + String(batteryPercent) + "%";
+  display.drawString(68, 50, batStr);
   
   display.display();
 }
@@ -296,5 +321,9 @@ void printToSerial() {
     Serial.print("%");
   }
   
-  Serial.println();
+  Serial.print(" | Батарея: ");
+  Serial.print(batteryVoltage, 2);
+  Serial.print("V (");
+  Serial.print(batteryPercent);
+  Serial.println("%)");
 }
