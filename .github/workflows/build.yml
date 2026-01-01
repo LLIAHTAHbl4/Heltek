@@ -24,12 +24,24 @@ jobs:
       
     - name: Compile sketch
       run: |
-        # Компиляция с правильным FQBN для ESP32-S3
-        arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+        # Создаем папку для сборки
+        mkdir -p build
+        # Компилируем в папку build
+        arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-path ./build .
+      
+    - name: List build files
+      run: |
+        echo "Содержимое папки build:"
+        ls -la ./build/
+        echo "Поиск .bin файлов:"
+        find . -name "*.bin" -type f
       
     - name: Upload firmware artifacts
       if: success()
       uses: actions/upload-artifact@v4
       with:
         name: firmware
-        path: ./*.bin
+        path: |
+          ./build/*.bin
+          ./build/*.elf
+        if-no-files-found: warn
