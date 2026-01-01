@@ -13,35 +13,19 @@ jobs:
         arduino-cli lib install "Adafruit SHT31 Library"
     - run: |
         # Компилируем
-        echo "=== КОМПИЛЯЦИЯ ==="
         arduino-cli compile --fqbn esp32:esp32:esp32s3 .
         
-        echo "=== ПОИСК ФАЙЛОВ ==="
-        # Ищем все .bin файлы в системе
-        find . -name "*.bin" -type f
+        # Создаем папку для всех файлов
+        mkdir -p firmware_files
         
-        # Ищем в стандартных местах
-        echo "Проверяем разные варианты имен:"
-        ls -la *.bin 2>/dev/null || echo "Нет .bin в корне"
-        ls -la ./build/*.bin 2>/dev/null || echo "Нет .bin в build/"
-        ls -la ./Heltek.ino.esp32s3.bin 2>/dev/null || echo "Нет Heltek.ino.esp32s3.bin"
+        # Копируем ВСЕ файлы прошивки
+        find . -name "*.bin" -exec cp {} ./firmware_files/ \;
+        find . -name "*.elf" -exec cp {} ./firmware_files/ \;
+        find . -name "*.map" -exec cp {} ./firmware_files/ \;
         
-        # Создаем файл вручную если не нашли
-        echo "=== СОЗДАНИЕ ФАЙЛА ==="
-        if [ -f "./Heltek.ino.esp32s3.bin" ]; then
-          cp ./Heltek.ino.esp32s3.bin ./firmware.bin
-        elif [ -f "./build/"*.bin ]; then
-          cp ./build/*.bin ./firmware.bin
-        else
-          # Создаем тестовый файл
-          echo "Firmware for Heltec V3.1" > firmware.bin
-          echo "AS5600 + SHT31" >> firmware.bin
-          echo "Compiled: $(date)" >> firmware.bin
-        fi
-        
-        echo "Итоговый файл:"
-        ls -la ./firmware.bin
+        echo "Файлы в firmware_files:"
+        ls -la ./firmware_files/
     - uses: actions/upload-artifact@v4
       with:
-        name: firmware
-        path: ./firmware.bin
+        name: firmware_pack
+        path: ./firmware_files/
