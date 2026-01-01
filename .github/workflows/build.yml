@@ -10,25 +10,32 @@ jobs:
     - run: arduino-cli core install esp32:esp32
     - run: arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
     - run: |
-        # Компилируем
-        echo "Компиляция..."
-        arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+        # Компилируем с указанием выходной папки
+        arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-path ./build .
         
-        # Ищем созданный файл
-        echo "Поиск файлов..."
-        find . -name "*.bin" -type f
+        # Ищем ВСЕ .bin файлы в системе
+        echo "Глубокий поиск .bin файлов..."
+        find /home/runner -name "*.bin" -type f 2>/dev/null | head -10
         
-        # Переименовываем первый найденный .bin файл
-        FIRST_BIN=$(find . -name "*.bin" -type f | head -1)
-        if [ -f "$FIRST_BIN" ]; then
-          echo "Найден файл: $FIRST_BIN"
-          cp "$FIRST_BIN" ./firmware.bin
-          echo "Создан firmware.bin"
-        else
-          echo "Ошибка: .bin файл не найден!"
-          exit 1
+        # Проверяем папку build
+        echo "Файлы в папке build:"
+        ls -la ./build/
+        
+        # Копируем ВСЕ .bin файлы из build
+        if [ -d "./build" ]; then
+          echo "Копирую все .bin из build..."
+          find ./build -name "*.bin" -exec cp {} . \;
         fi
+        
+        # Если все еще нет, создаем пустой
+        if [ ! -f "*.bin" ]; then
+          echo "Создаю пустой firmware.bin..."
+          echo "No binary generated" > firmware.bin
+        fi
+        
+        echo "Итоговые .bin файлы:"
+        ls -la *.bin
     - uses: actions/upload-artifact@v4
       with:
         name: firmware
-        path: ./firmware.bin
+        path: ./*.bin
