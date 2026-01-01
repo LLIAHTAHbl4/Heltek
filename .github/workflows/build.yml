@@ -1,4 +1,4 @@
-name: Build Heltec
+name: Build Heltec AS5600 + SHT31
 on: [push]
 
 jobs:
@@ -8,34 +8,7 @@ jobs:
     - uses: actions/checkout@v4
     - uses: arduino/setup-arduino-cli@v1
     - run: arduino-cli core install esp32:esp32
-    - run: arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
     - run: |
-        # Компилируем с указанием выходной папки
-        arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-path ./build .
-        
-        # Ищем ВСЕ .bin файлы в системе
-        echo "Глубокий поиск .bin файлов..."
-        find /home/runner -name "*.bin" -type f 2>/dev/null | head -10
-        
-        # Проверяем папку build
-        echo "Файлы в папке build:"
-        ls -la ./build/
-        
-        # Копируем ВСЕ .bin файлы из build
-        if [ -d "./build" ]; then
-          echo "Копирую все .bin из build..."
-          find ./build -name "*.bin" -exec cp {} . \;
-        fi
-        
-        # Если все еще нет, создаем пустой
-        if [ ! -f "*.bin" ]; then
-          echo "Создаю пустой firmware.bin..."
-          echo "No binary generated" > firmware.bin
-        fi
-        
-        echo "Итоговые .bin файлы:"
-        ls -la *.bin
-    - uses: actions/upload-artifact@v4
-      with:
-        name: firmware
-        path: ./*.bin
+        arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
+        arduino-cli lib install "Adafruit SHT31 Library"
+    - run: arduino-cli compile --fqbn esp32:esp32:esp32s3 .
