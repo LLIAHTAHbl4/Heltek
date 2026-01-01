@@ -12,3 +12,7 @@ jobs:
         arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
         arduino-cli lib install "Adafruit SHT31 Library"
     - run: arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+    - uses: actions/upload-artifact@v4
+      with:
+        name: firmware
+        path: ./Heltek.ino.esp32s3.bin
