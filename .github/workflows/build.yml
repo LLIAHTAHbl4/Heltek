@@ -1,4 +1,4 @@
-name: Build Heltec Test
+name: Build Heltec Dual Display
 on: [push]
 
 jobs:
@@ -13,14 +13,8 @@ jobs:
     - name: Install libraries
       run: |
         arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
-    - name: Compile sketch
-      run: |
-        # Компилируем и выводим список созданных файлов
-        arduino-cli compile --fqbn esp32:esp32:esp32s3 --output-dir ./build .
-        echo "Содержимое папки build:"
-        ls -la ./build/
-        echo "Копируем все .bin файлы"
-        cp ./build/*.bin ./
+    - name: Compile
+      run: arduino-cli compile --fqbn esp32:esp32:esp32s3 .
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
