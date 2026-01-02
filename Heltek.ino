@@ -1,99 +1,173 @@
-#include <Arduino.h>                      // Основные функции Arduino
-#include <Wire.h>                         // I2C шина
-#include "SSD1306Wire.h"                  // OLED дисплей Heltec
-#include <Adafruit_SHT31.h>               // Датчик температуры и влажности
-#include <AS5600.h>                       // Магнитный энкодер
-#include <NimBLEDevice.h>                 // BLE для ESP32-S3
+/*
+ * Heltec WiFi Kit 32 V3
+ * AS5600 + SHT31 + Battery + Bluetooth Classic (SPP)
+ * ВЕСЬ КОД ЦЕЛИКОМ
+ */
 
-#define VBAT_PIN 1                        // GPIO1 — измерение батареи на Heltec V3
-#define ADC_MAX 4095.0                    // Максимум 12-битного АЦП
-#define ADC_REF 3.3                       // Опорное напряжение АЦП
-#define VBAT_DIVIDER 2.0                  // Делитель напряжения на плате ~1:2
+#include <Wire.h>
+#include "SH1106Wire.h"
+#include "Adafruit_SHT31.h"
+#include "BluetoothSerial.h"
 
-SSD1306Wire display(0x3C, SDA, SCL);      // Экземпляр OLED дисплея
-Adafruit_SHT31 sht31 = Adafruit_SHT31();  // Экземпляр SHT31
-AS5600 as5600;                            // Экземпляр AS5600
+// ================== BLUETOOTH ==================
+BluetoothSerial SerialBT;
 
-BLECharacteristic *bleTx;                 // BLE характеристика передачи
-bool bleConnected = false;                // Флаг подключения BLE клиента
+// ================== I2C ==================
+#define SDA_PIN 17
+#define SCL_PIN 18
 
-// ===== CALLBACK BLE СЕРВЕРА =====
-class BleCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer*) {             // При подключении клиента
-    bleConnected = true;                   // Запоминаем соединение
+// ================== OLED ==================
+#define OLED_ADDR 0x3C
+#define OLED_VEXT 10
+#define OLED_RST  21
+
+SH1106Wire display(OLED_ADDR, SDA_PIN, SCL_PIN);
+
+// ================== SENSORS ==================
+#define AS5600_ADDR 0x36
+#define SHT31_ADDR  0x44
+
+Adafruit_SHT31 sht31;
+
+// ================== BATTERY ==================
+// Heltec V3 встроенный делитель
+#define BAT_ADC ADC1_CHANNEL_0
+
+// ⚠️ КАЛИБРОВКА (ПОД ТВОЮ ПЛАТУ)
+#define BAT_CALIBRATION 1.46   // подобрано под 4.17V
+#define BAT_MIN 3.3
+#define BAT_MAX 4.2
+
+// ================== GLOBALS ==================
+float angleDeg = 0;
+float temperature = 0;
+float humidity = 0;
+float batteryVoltage = 0;
+int batteryPercent = 0;
+
+unsigned long lastUpdate = 0;
+
+// ================== UTILS ==================
+float readBatteryFiltered() {
+  uint32_t sum = 0;
+
+  // Усреднение 32 измерения
+  for (int i = 0; i < 32; i++) {
+    sum += analogRead(BAT_ADC);
+    delay(2);
   }
-  void onDisconnect(BLEServer*) {          // При отключении клиента
-    bleConnected = false;                  // Сбрасываем флаг
-  }
-};
 
-// ===== ЧТЕНИЕ НАПРЯЖЕНИЯ АКБ =====
-float readBattery() {
-  uint32_t sum = 0;                        // Сумма измерений
-  for (int i = 0; i < 50; i++) {            // 50 измерений для усреднения
-    sum += analogRead(VBAT_PIN);            // Читаем АЦП
-    delay(2);                               // Небольшая задержка
-  }
-  float adc = sum / 50.0;                  // Среднее значение
-  return (adc / ADC_MAX) * ADC_REF * VBAT_DIVIDER; // Пересчёт в вольты
+  float adc = sum / 32.0;
+
+  // 12 бит, 3.3V
+  float v = (adc / 4095.0) * 3.3;
+
+  // КАЛИБРОВКА
+  return v * BAT_CALIBRATION;
 }
 
-// ===== ПРОЦЕНТ ЗАРЯДА АКБ =====
-int batteryPercent(float v) {
-  if (v >= 4.20) return 100;                // Полный заряд
-  if (v <= 3.20) return 0;                  // Пусто
-  return (int)((v - 3.20) * 100.0 / 1.0);   // Линейная аппроксимация
+int batteryToPercent(float v) {
+  if (v >= 4.20) return 100;
+  if (v >= 4.10) return 90;
+  if (v >= 4.00) return 80;
+  if (v >= 3.90) return 65;
+  if (v >= 3.80) return 50;
+  if (v >= 3.70) return 35;
+  if (v >= 3.60) return 20;
+  if (v >= 3.50) return 10;
+  return 0;
 }
 
-// ===== ОТПРАВКА В BLE =====
-void blePrint(String msg) {
-  if (bleConnected) {                      // Если клиент подключён
-    bleTx->setValue(msg.c_str());           // Передаём строку
-    bleTx->notify();                       // Уведомляем клиента
+// ================== AS5600 ==================
+uint16_t readAS5600() {
+  Wire.beginTransmission(AS5600_ADDR);
+  Wire.write(0x0C);
+  Wire.endTransmission(false);
+  Wire.requestFrom(AS5600_ADDR, 2);
+
+  if (Wire.available() == 2) {
+    uint16_t hi = Wire.read();
+    uint16_t lo = Wire.read();
+    return (hi << 8) | lo;
   }
+  return 0;
 }
 
-// ===== SETUP =====
+// ================== SETUP ==================
 void setup() {
-  analogReadResolution(12);                // Устанавливаем 12 бит АЦП
-  analogSetAttenuation(ADC_11db);           // Диапазон до ~3.6V
-  pinMode(VBAT_PIN, INPUT);                // Пин батареи как вход
+  Serial.begin(115200);
+  delay(500);
 
-  Wire.begin();                            // Запуск I2C
-  display.init();                         // Инициализация дисплея
-  display.flipScreenVertically();         // Правильная ориентация
-  display.clear();                        // Очистка экрана
+  SerialBT.begin("Heltec_V3");
+  Serial.println("Bluetooth SPP started");
+  SerialBT.println("Heltec V3 Bluetooth OK");
 
-  sht31.begin(0x44);                      // Запуск SHT31
-  as5600.begin();                         // Запуск AS5600
+  // ADC
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
 
-  BLEDevice::init("Heltec_V3_BLE");        // Имя BLE устройства
-  BLEServer *server = BLEDevice::createServer(); // Создаём сервер
-  server->setCallbacks(new BleCallbacks());      // Назначаем callback
+  // OLED
+  pinMode(OLED_VEXT, OUTPUT);
+  digitalWrite(OLED_VEXT, LOW);
+  delay(50);
 
-  BLEService *service = server->createService("6E400001-B5A3-F393-E0A9-E50E24DCCA9E"); // UART сервис
+  pinMode(OLED_RST, OUTPUT);
+  digitalWrite(OLED_RST, LOW);
+  delay(50);
+  digitalWrite(OLED_RST, HIGH);
 
-  bleTx = service->createCharacteristic(
-    "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
-    NIMBLE_PROPERTY::NOTIFY
-  );
+  Wire.begin(SDA_PIN, SCL_PIN);
 
-  service->start();                       // Запуск сервиса
-  BLEDevice::getAdvertising()->start();   // Запуск рекламы BLE
+  display.init();
+  display.flipScreenVertically();
+  display.clear();
+  display.display();
+
+  // SHT31
+  sht31.begin(SHT31_ADDR);
+
+  SerialBT.println("Setup complete");
 }
 
-// ===== LOOP =====
+// ================== LOOP ==================
 void loop() {
-  float vbat = readBattery();              // Читаем напряжение АКБ
-  int percent = batteryPercent(vbat);      // Считаем процент
+  if (millis() - lastUpdate < 500) return;
+  lastUpdate = millis();
 
-  display.clear();                         // Очистка экрана
-  display.setFont(ArialMT_Plain_16);       // Шрифт
-  display.drawString(0, 0, "VBAT: " + String(vbat, 2) + "V"); // Напряжение
-  display.drawString(0, 20, "BAT: " + String(percent) + "%"); // Процент
-  display.display();                       // Обновляем экран
+  // ===== AS5600 =====
+  uint16_t raw = readAS5600();
+  angleDeg = (raw * 360.0) / 4096.0;
 
-  blePrint("VBAT=" + String(vbat, 2) + "V " + String(percent) + "%"); // BLE лог
+  // ===== SHT31 =====
+  temperature = sht31.readTemperature();
+  humidity = sht31.readHumidity();
 
-  delay(1000);                             // Пауза 1 секунда
+  // ===== BATTERY =====
+  batteryVoltage = readBatteryFiltered();
+  batteryPercent = batteryToPercent(batteryVoltage);
+
+  // ===== OLED =====
+  display.clear();
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(0, 0, String(angleDeg, 1) + "°");
+
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(0, 22, "T: " + String(temperature, 1) + "C");
+  display.drawString(0, 34, "H: " + String(humidity, 1) + "%");
+  display.drawString(0, 46,
+    String(batteryVoltage, 2) + "V " +
+    String(batteryPercent) + "%");
+
+  display.display();
+
+  // ===== SERIAL + BT =====
+  String msg =
+    "Angle=" + String(angleDeg, 1) +
+    " Temp=" + String(temperature, 1) +
+    " Hum=" + String(humidity, 1) +
+    " Bat=" + String(batteryVoltage, 2) +
+    "V " + String(batteryPercent) + "%";
+
+  Serial.println(msg);
+  SerialBT.println(msg);
 }
