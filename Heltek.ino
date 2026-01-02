@@ -1,6 +1,8 @@
 /*
- * Heltec V3.1 - Мини тест батареи
- * Измерение VBAT через GPIO1 и вывод на OLED
+ * Heltec V3.1 - Стабильное измерение VBAT
+ * Диапазон батареи: 3.0V - 4.2V
+ * Используется GPIO1 (ADC1_CH0) и делитель 4.9x
+ * Плавное отображение на OLED через EMA фильтр
  */
 
 #include "Wire.h"
@@ -21,21 +23,25 @@ SH1106Wire display(DISPLAY_ADDR, SDA_PIN, SCL_PIN);
 #define BATTERY_MIN_VOLTAGE 3.0
 #define BATTERY_MAX_VOLTAGE 4.2
 
-// === Фильтр и чтение VBAT ===
-float readBatteryFiltered() {
-    const int samples = 10;
+float batteryVoltage = 0.0;
+
+// === Чтение и плавное сглаживание ===
+float readBatterySmooth() {
+    const int samples = 50;   // больше измерений для стабильности
     float sum = 0;
     for(int i=0; i<samples; i++){
         sum += analogRead(BAT_ADC);
-        delay(2);
+        delay(2); // короткая пауза для стабилизации
     }
     float adcVal = sum / samples;
-    float voltage = (adcVal / 4095.0f) * 3.3f;  // Напряжение на ADC
-    voltage *= BATTERY_DIVIDER;                 // Учёт делителя
-    return voltage;
+    float rawV = (adcVal / 4095.0f) * 3.3f * BATTERY_DIVIDER;
+
+    // Экспоненциальное сглаживание
+    batteryVoltage = 0.05 * rawV + 0.95 * batteryVoltage;
+    return batteryVoltage;
 }
 
-// === Конвертация в % ===
+// === Конвертация в % заряда ===
 int batteryPercent(float voltage){
     int percent = (voltage - BATTERY_MIN_VOLTAGE) * 100.0 / (BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE);
     if(percent > 100) percent = 100;
@@ -64,14 +70,18 @@ void setupDisplay() {
 }
 
 void setup() {
-    analogReadResolution(12);       // 12 бит
-    analogSetAttenuation(ADC_11db); // Диапазон до ~3.9V на ADC
+    analogReadResolution(12);        // 12 бит
+    analogSetAttenuation(ADC_11db);  // диапазон до ~3.9V
     setupDisplay();
+
+    // Инициализация фильтра
+    batteryVoltage = readBatterySmooth();
 }
 
 void loop() {
     display.clear();
-    float voltage = readBatteryFiltered();
+
+    float voltage = readBatterySmooth();
     int percent = batteryPercent(voltage);
 
     display.setFont(ArialMT_Plain_16);
@@ -81,5 +91,5 @@ void loop() {
     display.drawString(0, 40, "Charge: " + String(percent) + " %");
 
     display.display();
-    delay(1000); // Обновление каждую секунду
+    delay(1000); // обновление каждую секунду
 }
