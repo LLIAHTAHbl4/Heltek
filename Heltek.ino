@@ -1,162 +1,84 @@
 /*
- * Heltec WiFi Kit 32 V3 (ESP32-S3)
- * AS5600 + SHT31 + Battery monitor
- * OLED ONLY, стабильные показания батареи
+ * Heltec WiFi Kit 32 V3.1
+ * VBAT ADC Finder
+ * Проверка на каком ADC пине появляется напряжение батареи
+ * Напряжение отображается на OLED дисплее
  */
 
-#include <Wire.h>
+#include "Wire.h"
 #include "SH1106Wire.h"
-#include "Adafruit_SHT31.h"
 
-// ================= I2C =================
-#define SDA_PIN 17
-#define SCL_PIN 18
-
-// ================= OLED =================
-#define OLED_ADDR 0x3C
+// === ПИНЫ OLED ===
+#define SDA_PIN   17
+#define SCL_PIN   18
 #define OLED_VEXT 10
 #define OLED_RST  21
-SH1106Wire display(OLED_ADDR, SDA_PIN, SCL_PIN);
+#define DISPLAY_ADDR 0x3C
 
-// ================= SENSORS =================
-#define AS5600_ADDR 0x36
-Adafruit_SHT31 sht31;
+SH1106Wire display(DISPLAY_ADDR, SDA_PIN, SCL_PIN);
 
-// ================= BATTERY =================
-// На Heltec V3 встроенный делитель батареи на GPIO1
-#define BAT_ADC_PIN 1      // VBAT_SENSE
-#define BAT_CAL     1.43   // подстрой под свой АКБ (2.91V -> 4.15V)
-#define BAT_MIN     3.3
-#define BAT_MAX     4.2
+// === КОЭФФИЦИЕНТ ДЕЛИТЕЛЯ ===
+#define VBAT_DIVIDER 4.9f  // Делитель резисторов на плате 390K/100K
 
-// ================= GLOBALS =================
-float angleDeg = 0.0;
-float temperature = 0.0;
-float humidity = 0.0;
-float batteryVoltage = 0.0;
-int batteryPercent = 0;
-unsigned long lastUpdate = 0;
+// === СПИСОК ADC ПИНОВ, КОТОРЫЕ МОЖНО ПРОВЕРИТЬ ===
+const int adcPins[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+                       10,11,12,13,14,15,16,17,18,19,
+                       20,21,22,23,24,25,26,27,28,29,
+                       30,31,32,33,34,35,36,37,38,39};
 
-// ================= BATTERY FUNCTIONS =================
-float readBattery() {
-  uint32_t sum = 0;
-  for (int i = 0; i < 32; i++) {
-    sum += analogRead(BAT_ADC_PIN);
-    delay(1);
-  }
-  float adc = sum / 32.0;
-  float v = (adc / 4095.0) * 3.3; // базовое напряжение АЦП
-  return v * BAT_CAL;              // поправка делителя платы
+// === ФУНКЦИИ ===
+float readADC(int pin) {
+  analogReadResolution(12);      // 12 бит (0-4095)
+  analogSetAttenuation(ADC_11db); // Диапазон до ~3.9V на ADC
+  int val = analogRead(pin);
+  float voltage = (val / 4095.0f) * 3.3f; // Напряжение на ADC
+  return voltage;
 }
 
-int batteryToPercent(float v) {
-  if (v >= 4.20) return 100;
-  if (v >= 4.10) return 90;
-  if (v >= 4.00) return 80;
-  if (v >= 3.90) return 65;
-  if (v >= 3.80) return 50;
-  if (v >= 3.70) return 35;
-  if (v >= 3.60) return 20;
-  if (v >= 3.50) return 10;
-  return 0;
-}
-
-// ================= AS5600 =================
-uint16_t readAS5600() {
-  Wire.beginTransmission(AS5600_ADDR);
-  Wire.write(0x0C); // RAW ANGLE
-  Wire.endTransmission(false);
-  Wire.requestFrom(AS5600_ADDR, 2);
-  if (Wire.available() == 2) {
-    return (Wire.read() << 8) | Wire.read();
-  }
-  return 0;
-}
-
-// ================= SETUP =================
-void setup() {
-  Serial.begin(115200);
-  delay(300);
-
-  // ADC для ESP32-S3
-  analogReadResolution(12);
-  analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db);
-
-  // OLED power
+void setupDisplay() {
   pinMode(OLED_VEXT, OUTPUT);
-  digitalWrite(OLED_VEXT, LOW);
-  delay(50);
-
+  digitalWrite(OLED_VEXT, HIGH); // включаем дисплей
   pinMode(OLED_RST, OUTPUT);
   digitalWrite(OLED_RST, LOW);
   delay(50);
   digitalWrite(OLED_RST, HIGH);
+  delay(50);
 
-  // I2C
   Wire.begin(SDA_PIN, SCL_PIN);
-
-  // OLED init
   display.init();
   display.flipScreenVertically();
   display.clear();
-  display.display();
-
-  // SHT31
-  sht31.begin(0x44);
-
-  // Стартовый экран
   display.setFont(ArialMT_Plain_10);
-  display.drawString(0, 0, "Heltec WiFi Kit 32 V3");
-  display.drawString(0, 12, "AS5600 + SHT31");
-  display.drawString(0, 24, "Battery monitor");
+  display.drawString(0,0,"VBAT ADC Finder");
   display.display();
-  delay(1500);
+  delay(1000);
 }
 
-// ================= LOOP =================
+void setup() {
+  setupDisplay();
+}
+
 void loop() {
-  if (millis() - lastUpdate < 500) return;  // обновление 2 раза в секунду
-  lastUpdate = millis();
-
-  // AS5600
-  uint16_t raw = readAS5600();
-  angleDeg = (raw * 360.0) / 4096.0;
-
-  // SHT31
-  temperature = sht31.readTemperature();
-  humidity = sht31.readHumidity();
-
-  // Battery
-  batteryVoltage = readBattery();
-  batteryPercent = batteryToPercent(batteryVoltage);
-
-  // OLED
   display.clear();
-
-  display.setFont(ArialMT_Plain_16);
-  display.drawString(0, 0, String(angleDeg, 1) + "°");
-
   display.setFont(ArialMT_Plain_10);
-  display.drawString(0, 22, "T: " + String(temperature, 1) + " C");
-  display.drawString(0, 34, "H: " + String(humidity, 1) + " %");
-  display.drawString(
-    0,
-    46,
-    String(batteryVoltage, 2) + "V  " + String(batteryPercent) + "%"
-  );
+  display.drawString(0,0,"Scanning ADC pins...");
+
+  int y = 15;
+  for(int i=0; i < sizeof(adcPins)/sizeof(adcPins[0]); i++){
+    int pin = adcPins[i];
+    float adcV = readADC(pin);
+    float vbat = adcV * VBAT_DIVIDER;
+
+    // Печатаем только если напряжение >0.5V (чтобы отфильтровать "пустые" пины)
+    if(adcV > 0.5){
+      char buf[32];
+      snprintf(buf, sizeof(buf), "GPIO%d: %.2fV -> %.2fV", pin, adcV, vbat);
+      display.drawString(0,y,buf);
+      y += 10;
+      if(y > 50) break; // ограничение на экран
+    }
+  }
 
   display.display();
-
-  // Serial debug (по USB)
-  Serial.print("Angle=");
-  Serial.print(angleDeg, 1);
-  Serial.print(" T=");
-  Serial.print(temperature, 1);
-  Serial.print(" H=");
-  Serial.print(humidity, 1);
-  Serial.print(" Bat=");
-  Serial.print(batteryVoltage, 2);
-  Serial.print("V ");
-  Serial.print(batteryPercent);
-  Serial.println("%");
+  delay(1000);
 }
