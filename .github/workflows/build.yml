@@ -4,6 +4,7 @@ on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -17,15 +18,24 @@ jobs:
           arduino-cli lib install "AS5600"
           arduino-cli lib install "NimBLE-Arduino"
 
+      # ===== СБОРКА =====
       - run: |
           mkdir -p build
           arduino-cli compile \
             --fqbn esp32:esp32:esp32s3 \
             --build-path build \
             --export-binaries \
-            .
+            Heltek.ino
 
+      # ===== ОСТАВЛЯЕМ ТОЛЬКО merged.bin =====
+      - run: |
+          mkdir -p firmware
+          find build -type f -name "*.merged.bin" -exec cp {} firmware/ \;
+          echo "Оставшиеся файлы:"
+          ls -la firmware
+
+      # ===== АРТЕФАКТ =====
       - uses: actions/upload-artifact@v4
         with:
-          name: firmware_pack
-          path: build
+          name: heltec_firmware
+          path: firmware/*.merged.bin
