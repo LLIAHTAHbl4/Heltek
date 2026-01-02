@@ -7,6 +7,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: arduino/setup-arduino-cli@v1
 
       - run: arduino-cli core install esp32:esp32
@@ -14,7 +15,6 @@ jobs:
       - run: |
           arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
           arduino-cli lib install "Adafruit SHT31 Library"
-          arduino-cli lib install "NimBLE-Arduino"
 
       - run: |
           mkdir -p build
@@ -27,6 +27,7 @@ jobs:
       - run: |
           mkdir -p firmware
           find build -name "*.merged.bin" -exec cp {} firmware/ \;
+          ls -la firmware
 
       - uses: actions/upload-artifact@v4
         with:
