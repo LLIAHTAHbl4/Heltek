@@ -15,10 +15,7 @@ jobs:
       - run: |
           arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
           arduino-cli lib install "Adafruit SHT31 Library"
-          arduino-cli lib install "AS5600"
-          arduino-cli lib install "NimBLE-Arduino"
 
-      # ===== СБОРКА =====
       - run: |
           mkdir -p build
           arduino-cli compile \
@@ -27,14 +24,11 @@ jobs:
             --export-binaries \
             Heltek.ino
 
-      # ===== ОСТАВЛЯЕМ ТОЛЬКО merged.bin =====
       - run: |
           mkdir -p firmware
-          find build -type f -name "*.merged.bin" -exec cp {} firmware/ \;
-          echo "Оставшиеся файлы:"
+          find build -name "*.merged.bin" -exec cp {} firmware/ \;
           ls -la firmware
 
-      # ===== АРТЕФАКТ =====
       - uses: actions/upload-artifact@v4
         with:
           name: heltec_firmware
