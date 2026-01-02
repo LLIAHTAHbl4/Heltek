@@ -1,35 +1,31 @@
-name: Build Heltec ESP32-S3
-
+name: Build Heltec
 on: [push]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - uses: arduino/setup-arduino-cli@v1
+      - uses: arduino/setup-arduino-cli@v1
 
-    - name: Install ESP32 core
-      run: arduino-cli core install esp32:esp32
+      - run: arduino-cli core install esp32:esp32
 
-    - name: Install libraries
-      run: |
-        arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
-        arduino-cli lib install "Adafruit SHT31 Library"
+      - run: |
+          arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
+          arduino-cli lib install "Adafruit SHT31 Library"
+          arduino-cli lib install "AS5600"
+          arduino-cli lib install "NimBLE-Arduino"
 
-    - name: Compile firmware
-      run: |
-        mkdir -p build
-        arduino-cli compile \
-          --fqbn esp32:esp32:esp32s3 \
-          --build-path build \
-          --export-binaries \
-          .
+      - run: |
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --build-path build \
+            --export-binaries \
+            .
 
-    - name: Upload firmware
-      uses: actions/upload-artifact@v4
-      with:
-        name: heltec_firmware
-        path: build/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware_pack
+          path: build
