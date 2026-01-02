@@ -25,13 +25,11 @@ SH1106Wire display(OLED_ADDR, SDA_PIN, SCL_PIN);
 Adafruit_SHT31 sht31;
 
 // ================= BATTERY =================
-// Heltec WiFi Kit 32 V3 battery ADC
-#define BAT_ADC_PIN 1   // GPIO1 (внутренний делитель)
-
-// КАЛИБРОВКА (под твою плату)
-#define BAT_CAL 1.46
-#define BAT_MIN 3.3
-#define BAT_MAX 4.2
+// На Heltec V3 встроенный делитель батареи на GPIO1
+#define BAT_ADC_PIN 1   // VBAT_SENSE
+#define BAT_CAL     3.85  // подстрой под свой АКБ для точности
+#define BAT_MIN     3.3
+#define BAT_MAX     4.2
 
 // ================= GLOBALS =================
 float angleDeg = 0.0;
@@ -44,15 +42,16 @@ unsigned long lastUpdate = 0;
 
 // ================= BATTERY =================
 float readBattery() {
+  // Усреднение для стабильных показаний
   uint32_t sum = 0;
   for (int i = 0; i < 32; i++) {
     sum += analogRead(BAT_ADC_PIN);
-    delay(2);
+    delay(1);
   }
 
   float adc = sum / 32.0;
-  float v = (adc / 4095.0) * 3.3;
-  return v * BAT_CAL;
+  float v = (adc / 4095.0) * 3.3;  // базовое напряжение АЦП
+  return v * BAT_CAL;               // поправка делителя платы
 }
 
 int batteryToPercent(float v) {
@@ -85,9 +84,9 @@ void setup() {
   Serial.begin(115200);
   delay(300);
 
-  // ADC
+  // ADC для ESP32-S3
   analogReadResolution(12);
-  analogSetAttenuation(ADC_11db);
+  analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db);
 
   // OLED power
   pinMode(OLED_VEXT, OUTPUT);
@@ -111,7 +110,7 @@ void setup() {
   // SHT31
   sht31.begin(SHT31_ADDR);
 
-  // Start screen
+  // Стартовый экран
   display.setFont(ArialMT_Plain_10);
   display.drawString(0, 0, "Heltec WiFi Kit 32 V3");
   display.drawString(0, 12, "AS5600 + SHT31");
@@ -122,7 +121,7 @@ void setup() {
 
 // ================= LOOP =================
 void loop() {
-  if (millis() - lastUpdate < 500) return;
+  if (millis() - lastUpdate < 500) return;  // обновление 2 раза в секунду
   lastUpdate = millis();
 
   // AS5600
@@ -154,7 +153,7 @@ void loop() {
 
   display.display();
 
-  // Serial debug (по USB, если нужно)
+  // Serial debug (по USB)
   Serial.print("Angle=");
   Serial.print(angleDeg, 1);
   Serial.print(" T=");
